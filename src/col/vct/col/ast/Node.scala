@@ -136,6 +136,9 @@ final case class TType[G](t: Type[G])(implicit val o: Origin = DiagnosticOrigin)
 final case class TVar[G](ref: Ref[G, Variable[G]])(
     implicit val o: Origin = DiagnosticOrigin
 ) extends Type[G] with TVarImpl[G]
+final case class JavaTSubtype[G](refs: Seq[Ref[G, AbstractSubtype[G]]])(
+    implicit val o: Origin = DiagnosticOrigin
+) extends Type[G] with JavaTSubtypeImpl[G]
 
 sealed trait CompositeType[G] extends Type[G] with CompositeTypeImpl[G]
 sealed trait SizedType[G] extends CompositeType[G] with SizedTypeImpl[G]
@@ -698,6 +701,14 @@ final class Enum[G](val constants: Seq[EnumConstant[G]])(implicit val o: Origin)
 @family
 final class EnumConstant[G]()(implicit val o: Origin)
     extends Declaration[G] with EnumConstantImpl[G]
+@scopes[Variable]
+final class GlobalSubtype[G](
+    val args: Seq[Variable[G]],
+    val body: Option[Expr[G]],
+)(implicit val o: Origin)
+    extends AbstractSubtype[G]
+    with GlobalDeclaration[G]
+    with GlobalSubtypeImpl[G]
 
 final class ProverType[G](val interpretation: Seq[(ProverLanguage[G], String)])(
     implicit val o: Origin
@@ -799,6 +810,14 @@ final class InstanceOperatorMethod[G](
     extends ClassDeclaration[G]
     with AbstractMethod[G]
     with InstanceOperatorMethodImpl[G]
+@scopes[Variable]
+final class InstanceSubtype[G](
+    val args: Seq[Variable[G]],
+    val body: Option[Expr[G]],
+)(implicit val o: Origin)
+    extends AbstractSubtype[G]
+    with ClassDeclaration[G]
+    with InstanceSubtypeImpl[G]
 
 @family
 sealed trait Operator[G] extends NodeFamily[G] with OperatorImpl[G]
@@ -869,6 +888,8 @@ sealed trait AbstractFunction[G]
 sealed trait AbstractMethod[G]
     extends ContractApplicable[G] with AbstractMethodImpl[G]
 sealed trait Field[G] extends FieldImpl[G]
+sealed trait AbstractSubtype[G]
+    extends Applicable[G] with AbstractSubtypeImpl[G]
 
 @family @scopes[Variable]
 final case class SignalsClause[G](binding: Variable[G], assn: Expr[G])(

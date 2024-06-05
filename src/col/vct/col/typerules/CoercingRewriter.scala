@@ -2352,6 +2352,8 @@ abstract class CoercingRewriter[Pre <: Generation]()
           predicate.threadLocal,
           predicate.inline,
         )
+      case subtype: GlobalSubtype[Pre] =>
+        new GlobalSubtype[Pre](subtype.args, subtype.body.map(res))
       case definition: CFunctionDefinition[Pre] => definition
       case declaration: CGlobalDeclaration[Pre] => declaration
       case declaration: CStructMemberDeclarator[Pre] => declaration
@@ -2390,6 +2392,8 @@ abstract class CoercingRewriter[Pre <: Generation]()
           predicate.threadLocal,
           predicate.inline,
         )
+      case subtype: InstanceSubtype[Pre] =>
+        new InstanceSubtype[Pre](subtype.args, subtype.body.map(res))
       case field: InstanceField[Pre] => field
       case method: RunMethod[Pre] => method
       case method: InstanceOperatorMethod[Pre] => method

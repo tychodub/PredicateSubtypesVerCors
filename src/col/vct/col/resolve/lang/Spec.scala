@@ -338,6 +338,14 @@ case object Spec {
       case ref @ RefPredicate(decl) if ref.name == name => decl
     }
 
+  def findGlobalSubtype[G](
+      name: String,
+      ctx: ReferenceResolutionContext[G],
+  ): Option[GlobalSubtype[G]] =
+    ctx.stack.flatten.collectFirst {
+      case ref @ RefGlobalSubtype(decl) if ref.name == name => decl
+    }
+
   def findSilverField[G](
       name: String,
       ctx: ReferenceResolutionContext[G],
@@ -381,6 +389,15 @@ case object Spec {
           case ref @ RefInstancePredicate(decl) if ref.name == name => decl
         }
       case _ => None
+    }
+
+  // using global resolution should be a temporary hack
+  def findInstanceSubtype[G](
+      name: String,
+      ctx: ReferenceResolutionContext[G],
+  ): Option[InstanceSubtype[G]] =
+    ctx.stack.flatten.collectFirst {
+      case ref @ RefInstanceSubtype(decl) if ref.name == name => decl
     }
 
   def findField[G](obj: Expr[G], name: String): Option[InstanceField[G]] =

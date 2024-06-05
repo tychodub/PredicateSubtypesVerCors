@@ -364,6 +364,7 @@ valGlobalDeclaration
  | 'adt' langId valTypeVars? '{' valAdtDeclaration* '}' # valAdtDecl
  | 'prover_type' langId valProverInterpretations ';' # valProverType
  | 'prover_function' langType langId '(' valArgList? ')' valProverInterpretations ';' # valProverFunction
+ | 'subtype' langId '(' valArg ')' '(' valArgList? ')' valPureDef # valGlobalSubtype
  ;
 
 valProverInterpretations
@@ -382,6 +383,7 @@ valClassDeclaration
  | 'ghost' langClassDecl # valInstanceGhostDecl
  | valContractClause* valModifier* 'pure' langType valOperatorName '(' valArgList? ')' valPureDef # valInstanceOperatorFunction
  | valContractClause* valModifier*  langType valOperatorName '(' valArgList? ')' valImpureDef # valInstanceOperatorMethod
+ | 'subtype' langId '(' valArg ')' '(' valArgList? ')' valPureDef # valInstanceSubtype
  ;
 
 valOperatorName
@@ -433,6 +435,15 @@ valEmbedContract: valEmbedContractBlock+;
 valEmbedContractBlock
  : startSpec valContractClause* endSpec
  | {specLevel>0}? valContractClause+
+ ;
+
+valEmbedSubtype
+ : startSpec valSubtypeClause+ endSpec
+ | {specLevel>0}? valSubtypeClause+
+ ;
+
+valSubtypeClause
+ : langId
  ;
 
 valEmbedStatementBlock

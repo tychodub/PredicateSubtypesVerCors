@@ -69,6 +69,7 @@ VAL_MODEL: 'model';
 VAL_ADT: 'adt';
 VAL_PROVER_TYPE: 'prover_type';
 VAL_PROVER_FUNCTION: 'prover_function';
+VAL_SUBTYPE: 'subtype';
 
 VAL_MODIFIES: 'modifies';
 VAL_ACCESSIBLE: 'accessible';

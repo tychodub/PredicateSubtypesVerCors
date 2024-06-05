@@ -276,6 +276,7 @@ type
     :   {specLevel>0}? valType
     |   classOrInterfaceType dims?
     |   primitiveType dims?
+    |   valEmbedSubtype type
     ;
 
 typeOrVoid

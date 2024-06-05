@@ -846,7 +846,19 @@ case class JavaToCol[G](
           dims.map(convert(_)).getOrElse(0),
           convert(element),
         )
+      case Type3(subtypes, supertype) => JavaTSubtype(convert(subtypes))
     }
+
+  def convert(
+      implicit t: ValEmbedSubtypeContext
+  ): Seq[Ref[G, AbstractSubtype[G]]] =
+    t match {
+      case ValEmbedSubtype0(_, subtypes, _) => subtypes.map(convert(_))
+      case ValEmbedSubtype1(subtypes) => subtypes.map(convert(_))
+    }
+
+  def convert(implicit t: ValSubtypeClauseContext): Ref[G, AbstractSubtype[G]] =
+    t match { case ValSubtypeClause0(name) => new UnresolvedRef(convert(name)) }
 
   def convert(implicit t: ClassOrInterfaceTypeContext): JavaNamedType[G] =
     t match {
@@ -2034,6 +2046,28 @@ case class JavaToCol[G](
             typeArgs.map(convert(_)).getOrElse(Nil),
           )(origin(decl).sourceName(convert(name)))
         )
+      case ValGlobalSubtype(
+            _,
+            name,
+            _,
+            subtypedVar,
+            _,
+            _,
+            args,
+            _,
+            definition,
+          ) =>
+        definition match {
+          case ValPureAbstractBody(_) =>
+            fail(name, "abstract subtype bodies not supported")
+          case ValPureBody(_, expr, _) =>
+            Seq(
+              new GlobalSubtype(
+                convert(subtypedVar) +: args.map(convert(_)).getOrElse(Nil),
+                Some(convert(expr)),
+              )(origin(decl).sourceName(convert(name)))
+            )
+        }
     }
 
   def convert(
@@ -2161,6 +2195,28 @@ case class JavaToCol[G](
             )
           },
         ))
+      case ValInstanceSubtype(
+            "subtype",
+            subtype,
+            "(",
+            subtypedVar,
+            ")",
+            "(",
+            args,
+            ")",
+            definition,
+          ) =>
+        definition match {
+          case ValPureAbstractBody(_) =>
+            fail(subtype, "abstract subtype bodies not supported")
+          case ValPureBody(_, expr, _) =>
+            Seq(transform(
+              new InstanceSubtype(
+                convert(subtypedVar) +: args.map(convert(_)).getOrElse(Nil),
+                Some(convert(expr)),
+              )(origin(decl).sourceName(convert(subtype)))
+            ))
+        }
     }
 
   def convert(implicit operator: ValOperatorNameContext): Operator[G] =

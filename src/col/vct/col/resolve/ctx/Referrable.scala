@@ -59,6 +59,7 @@ sealed trait Referrable[G] {
       case RefProcedure(decl) => Referrable.originName(decl)
       case RefVeSUVMainMethod(_) => ""
       case RefPredicate(decl) => Referrable.originName(decl)
+      case RefGlobalSubtype(decl) => Referrable.originName(decl)
       case RefClass(decl) => Referrable.originName(decl)
       case RefModel(decl) => Referrable.originName(decl)
       case RefEnum(decl) => Referrable.originName(decl)
@@ -75,6 +76,7 @@ sealed trait Referrable[G] {
       case RefInstanceOperatorMethod(decl) => Referrable.originName(decl)
       case RefInstanceOperatorFunction(decl) => Referrable.originName(decl)
       case RefInstancePredicate(decl) => Referrable.originName(decl)
+      case RefInstanceSubtype(decl) => Referrable.originName(decl)
       case RefField(decl) => Referrable.originName(decl)
       case RefVariable(decl) => Referrable.originName(decl)
       case RefLabelDecl(decl) => Referrable.originName(decl)
@@ -162,6 +164,7 @@ case object Referrable {
       case decl: Procedure[G] => RefProcedure(decl)
       case decl: VeSUVMainMethod[G] => RefVeSUVMainMethod(decl)
       case decl: Predicate[G] => RefPredicate(decl)
+      case decl: GlobalSubtype[G] => RefGlobalSubtype(decl)
       case decl: Class[G] => RefClass(decl)
       case decl: Model[G] => RefModel(decl)
       case decl: Enum[G] => RefEnum(decl)
@@ -180,6 +183,7 @@ case object Referrable {
       case decl: InstanceOperatorFunction[G] =>
         RefInstanceOperatorFunction(decl)
       case decl: InstancePredicate[G] => RefInstancePredicate(decl)
+      case decl: InstanceSubtype[G] => RefInstanceSubtype(decl)
       case decl: InstanceField[G] => RefField(decl)
       case decl: Variable[G] => RefVariable(decl)
       case decl: LabelDecl[G] => RefLabelDecl(decl)
@@ -388,6 +392,8 @@ case class RefVeSUVMainMethod[G](decl: VeSUVMainMethod[G])
     extends Referrable[G] with SpecInvocationTarget[G] with ResultTarget[G]
 case class RefPredicate[G](decl: Predicate[G])
     extends Referrable[G] with SpecInvocationTarget[G]
+case class RefGlobalSubtype[G](decl: GlobalSubtype[G])
+    extends Referrable[G] with SpecInvocationTarget[G]
 case class RefClass[G](decl: Class[G])
     extends Referrable[G]
     with PVLTypeNameTarget[G]
@@ -426,6 +432,8 @@ case class RefInstanceOperatorMethod[G](decl: InstanceOperatorMethod[G])
 case class RefInstanceOperatorFunction[G](decl: InstanceOperatorFunction[G])
     extends Referrable[G] with ResultTarget[G]
 case class RefInstancePredicate[G](decl: InstancePredicate[G])
+    extends Referrable[G] with SpecInvocationTarget[G]
+case class RefInstanceSubtype[G](decl: InstanceSubtype[G])
     extends Referrable[G] with SpecInvocationTarget[G]
 case class RefField[G](decl: InstanceField[G])
     extends Referrable[G] with PVLNameTarget[G] with PVLDerefTarget[G]
