@@ -301,6 +301,8 @@ abstract class CoercingRewriter[Pre <: Generation]()
       case CoerceCIntCFloat(_) => e
       case CoerceCIntInt() => e
       case CoerceCFloatFloat(_, _) => e
+      case CoerceSubtypeSupertype(supertype) => e
+      case CoerceSupertypeSubtype(supertype) => e
     }
   }
 
@@ -2353,7 +2355,7 @@ abstract class CoercingRewriter[Pre <: Generation]()
           predicate.inline,
         )
       case subtype: GlobalSubtype[Pre] =>
-        new GlobalSubtype[Pre](subtype.args, subtype.body.map(res))
+        new GlobalSubtype[Pre](subtype.args, subtype.body.map(bool))
       case definition: CFunctionDefinition[Pre] => definition
       case declaration: CGlobalDeclaration[Pre] => declaration
       case declaration: CStructMemberDeclarator[Pre] => declaration
@@ -2393,7 +2395,7 @@ abstract class CoercingRewriter[Pre <: Generation]()
           predicate.inline,
         )
       case subtype: InstanceSubtype[Pre] =>
-        new InstanceSubtype[Pre](subtype.args, subtype.body.map(res))
+        new InstanceSubtype[Pre](subtype.args, subtype.body.map(bool))
       case field: InstanceField[Pre] => field
       case method: RunMethod[Pre] => method
       case method: InstanceOperatorMethod[Pre] => method

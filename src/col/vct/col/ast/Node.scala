@@ -136,9 +136,11 @@ final case class TType[G](t: Type[G])(implicit val o: Origin = DiagnosticOrigin)
 final case class TVar[G](ref: Ref[G, Variable[G]])(
     implicit val o: Origin = DiagnosticOrigin
 ) extends Type[G] with TVarImpl[G]
-final case class JavaTSubtype[G](refs: Seq[Ref[G, AbstractSubtype[G]]])(
-    implicit val o: Origin = DiagnosticOrigin
-) extends Type[G] with JavaTSubtypeImpl[G]
+final case class JavaTSubtype[G](
+    refs: Seq[Ref[G, AbstractSubtype[G]]],
+    supertype: Type[G],
+)(implicit val o: Origin = DiagnosticOrigin)
+    extends Type[G] with JavaTSubtypeImpl[G]
 
 sealed trait CompositeType[G] extends Type[G] with CompositeTypeImpl[G]
 sealed trait SizedType[G] extends CompositeType[G] with SizedTypeImpl[G]
@@ -1147,6 +1149,11 @@ final case class CoerceRatZFrac[G]()(implicit val o: Origin)
     extends Coercion[G] with CoerceRatZFracImpl[G]
 final case class CoerceZFracFrac[G]()(implicit val o: Origin)
     extends Coercion[G] with CoerceZFracFracImpl[G]
+
+final case class CoerceSubtypeSupertype[G](target: Type[G])(implicit val o: Origin)
+    extends Coercion[G] with CoerceSubtypeSupertypeImpl[G]
+final case class CoerceSupertypeSubtype[G](target: Type[G])(implicit val o: Origin)
+    extends Coercion[G] with CoerceSupertypeSubtypeImpl[G]
 
 @family
 sealed trait Expr[G] extends NodeFamily[G] with ExprImpl[G]

@@ -280,6 +280,15 @@ case object ResolveTypes {
             case None => throw NoSuchNameError("class", name, endpoint)
           }
         )
+      case inv @ JavaTSubtype(subtypes, supertype) =>
+        subtypes.foreach(ref =>
+          ref.tryResolve(name =>
+            Spec.findInstanceSubtype(name, ctx).getOrElse(
+              Spec.findGlobalSubtype(name, ctx)
+                .getOrElse(throw NoSuchNameError("subtype", name, inv))
+            )
+          )
+        )
 
       case _ =>
     }
@@ -905,7 +914,7 @@ case object ResolveReferences extends LazyLogging {
           Spec.findInstancePredicate(obj, name)
             .getOrElse(throw NoSuchNameError("predicate", name, inv))
         )
-      case inv @ JavaTSubtype(refs) =>
+      /* case inv @ JavaTSubtype(refs, supertype) =>
         refs.foreach(ref =>
           ref.tryResolve(name =>
             Spec.findInstanceSubtype(name, ctx).getOrElse(
@@ -913,7 +922,7 @@ case object ResolveReferences extends LazyLogging {
                 .getOrElse(throw NoSuchNameError("subtype", name, inv))
             )
           )
-        )
+        ) */
 
       case defn: CFunctionDefinition[G] =>
         defn.ref = C.findForwardDeclaration(defn.declarator, ctx)

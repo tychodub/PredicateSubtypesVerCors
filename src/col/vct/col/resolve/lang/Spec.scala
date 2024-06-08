@@ -340,7 +340,7 @@ case object Spec {
 
   def findGlobalSubtype[G](
       name: String,
-      ctx: ReferenceResolutionContext[G],
+      ctx: TypeResolutionContext[G],
   ): Option[GlobalSubtype[G]] =
     ctx.stack.flatten.collectFirst {
       case ref @ RefGlobalSubtype(decl) if ref.name == name => decl
@@ -394,7 +394,7 @@ case object Spec {
   // using global resolution should be a temporary hack
   def findInstanceSubtype[G](
       name: String,
-      ctx: ReferenceResolutionContext[G],
+      ctx: TypeResolutionContext[G],
   ): Option[InstanceSubtype[G]] =
     ctx.stack.flatten.collectFirst {
       case ref @ RefInstanceSubtype(decl) if ref.name == name => decl

@@ -846,7 +846,7 @@ case class JavaToCol[G](
           dims.map(convert(_)).getOrElse(0),
           convert(element),
         )
-      case Type3(subtypes, supertype) => JavaTSubtype(convert(subtypes))
+      case Type3(subtypes, supertype) => JavaTSubtype(convert(subtypes), convert(supertype))
     }
 
   def convert(

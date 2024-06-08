@@ -114,6 +114,12 @@ case object CoercionUtils {
           innerSource,
           innerTarget,
         )
+      case (JavaTSubtype(_, supertype), typeRight)
+          if (typeRight.superTypeOf(supertype)) =>
+        CoerceSubtypeSupertype(typeRight)
+      case (typeLeft, JavaTSubtype(_, supertype))
+          if (supertype.superTypeOf(typeLeft)) =>
+        CoerceSupertypeSubtype(typeLeft)
 
       case (TNull(), TRef()) => CoerceNullRef()
       case (TNull(), TArray(target)) => CoerceNullArray(target)

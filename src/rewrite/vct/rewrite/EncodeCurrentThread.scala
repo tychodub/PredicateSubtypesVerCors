@@ -57,6 +57,7 @@ case class EncodeCurrentThread[Pre <: Generation]() extends Rewriter[Pre] {
       case _: ProverFunction[Pre] => false
       case _: ModelProcess[Pre] => false
       case _: ModelAction[Pre] => false
+      case _: AbstractSubtype[Pre] => false
     }
 
   override def dispatch(decl: Declaration[Pre]): Unit =
