@@ -110,7 +110,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
         classDeclarations.succeed(
           method,
           new InstanceMethod(
-            returnType = dispatch(method.returnType),
+            returnType = dispatch(extractSupertype(method.returnType)),
             args = variables.dispatch(method.args),
             outArgs = variables.dispatch(method.outArgs),
             typeArgs = variables.dispatch(method.typeArgs),
