@@ -280,15 +280,17 @@ case object ResolveTypes {
             case None => throw NoSuchNameError("class", name, endpoint)
           }
         )
-      case inv @ JavaTSubtype(subtypes, supertype) =>
-        subtypes.foreach(ref =>
-          ref.tryResolve(name =>
-            Spec.findInstanceSubtype(name, ctx).getOrElse(
-              Spec.findGlobalSubtype(name, ctx)
-                .getOrElse(throw NoSuchNameError("subtype", name, inv))
+      case inv @ TSubtype(subtypes, supertype) =>
+        subtypes.foreach {
+          case ref: SubtypeApply[G] =>
+            ref.ref.tryResolve(name =>
+              Spec.findInstanceSubtype(name, ctx).getOrElse(
+                Spec.findGlobalSubtype(name, ctx)
+                  .getOrElse(throw NoSuchNameError("subtype", name, inv))
+              )
             )
-          )
-        )
+          case other => throw ??? // should never happen
+        }
 
       case _ =>
     }

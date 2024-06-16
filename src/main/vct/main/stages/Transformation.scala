@@ -35,6 +35,7 @@ import vct.rewrite.{
   HeapVariableToRef,
   MonomorphizeClass,
   SmtlibToProverTypes,
+  SubtypeFunctionArgRewrite,
 }
 import vct.rewrite.lang.ReplaceSYCLTypes
 import vct.rewrite.veymont.{
@@ -44,12 +45,12 @@ import vct.rewrite.veymont.{
   EncodeChorBranchUnanimity,
   EncodeChoreography,
   EncodeEndpointInequalities,
-  StratifyUnpointedExpressions,
   GenerateChoreographyPermissions,
   GenerateImplementation,
   InferEndpointContexts,
   SpecializeEndpointClasses,
   StratifyExpressions,
+  StratifyUnpointedExpressions,
 }
 
 import java.nio.file.Path
@@ -315,6 +316,9 @@ case class SilverTransformation(
         Disambiguate, // Resolve overloaded operators (+, subscript, etc.)
         DisambiguateLocation, // Resolve location type
         EncodeRangedFor,
+
+        // transform subtypes to contracts
+        SubtypeFunctionArgRewrite,
 
         // VeyMont sequential program encoding
         StratifyExpressions,

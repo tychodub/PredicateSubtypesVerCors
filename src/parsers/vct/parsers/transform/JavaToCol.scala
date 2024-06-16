@@ -846,19 +846,21 @@ case class JavaToCol[G](
           dims.map(convert(_)).getOrElse(0),
           convert(element),
         )
-      case Type3(subtypes, supertype) => JavaTSubtype(convert(subtypes), convert(supertype))
+      case Type3(subtypes, supertype) =>
+        TSubtype(convert(subtypes), convert(supertype))
     }
 
-  def convert(
-      implicit t: ValEmbedSubtypeContext
-  ): Seq[Ref[G, AbstractSubtype[G]]] =
+  def convert(implicit t: ValEmbedSubtypeContext): Seq[SubtypeApply[G]] =
     t match {
       case ValEmbedSubtype0(_, subtypes, _) => subtypes.map(convert(_))
       case ValEmbedSubtype1(subtypes) => subtypes.map(convert(_))
     }
 
-  def convert(implicit t: ValSubtypeClauseContext): Ref[G, AbstractSubtype[G]] =
-    t match { case ValSubtypeClause0(name) => new UnresolvedRef(convert(name)) }
+  def convert(implicit t: ValSubtypeClauseContext): SubtypeApply[G] =
+    t match {
+      case ValSubtypeClause0(name) =>
+        SubtypeApply(new UnresolvedRef(convert(name)), Seq())
+    }
 
   def convert(implicit t: ClassOrInterfaceTypeContext): JavaNamedType[G] =
     t match {

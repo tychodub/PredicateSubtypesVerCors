@@ -114,10 +114,10 @@ case object CoercionUtils {
           innerSource,
           innerTarget,
         )
-      case (JavaTSubtype(_, supertype), typeRight)
+      case (TSubtype(_, supertype), typeRight)
           if (typeRight.superTypeOf(supertype)) =>
         CoerceSubtypeSupertype(typeRight)
-      case (typeLeft, JavaTSubtype(_, supertype))
+      case (typeLeft, TSubtype(_, supertype))
           if (supertype.superTypeOf(typeLeft)) =>
         CoerceSupertypeSubtype(typeLeft)
 

@@ -139,6 +139,7 @@ object AstBuildHelpers {
         case action: ModelAction[Pre] => action.rewrite(args = args)
         case llvm: LlvmFunctionDefinition[Pre] => llvm.rewrite(args = args)
         case prover: ProverFunction[Pre] => prover.rewrite(args = args)
+        case subtype: AbstractSubtype[Pre] => subtype.rewrite(args = args)
       }
   }
 
@@ -382,6 +383,7 @@ object AstBuildHelpers {
           new ApplyAnyPredicateBuildHelpers(apply).rewrite(args = args)
         case inv: Invocation[Pre] =>
           new InvocationBuildHelpers(inv).rewrite(args = args)
+        case inv: SubtypeApply[Pre] => inv.rewrite(args = args)
       }
   }
 
