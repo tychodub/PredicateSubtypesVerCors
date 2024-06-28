@@ -2335,6 +2335,8 @@ case class JavaToCol[G](
       case ValTypeType(_, _, element, _) => TType(convert(element))
       case ValEitherType(_, _, left, _, right, _) =>
         TEither(convert(left), convert(right))
+      case ValSubtype(_, _, supertype, _, subtypes, _) =>
+        TSubtype(subtypes.map(convert(_)), convert(supertype))
     }
 
   def convert(implicit e: ValPrimarySeqContext): Expr[G] =

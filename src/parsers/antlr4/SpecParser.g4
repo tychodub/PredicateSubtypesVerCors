@@ -353,6 +353,7 @@ valType
  | 'pointer' '<' langType '>' # valPointerType
  | 'type' '<' langType '>' # valTypeType
  | 'either' '<' langType ',' langType '>' # valEitherType
+ | 'subtype' '<' langType ',' valSubtypeClause+ '>' # valSubtype
  ;
 
 valGlobalDeclaration
