@@ -156,15 +156,15 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
               assign
             ))
           ))
-      /*
       case assign =>
-        assign.collect { case expr: AssignExpression[Pre] => expr.target }
-          .flatMap(target =>
-            gatherSubtypes(target.t).map(subtype =>
-              Assert(dispatch(subtype, target))(AssertSubtypeFailed(assign))
+        Seq(assign.rewriteDefault()).appendedAll(
+          assign.collect { case expr: AssignExpression[Pre] => expr.target }
+            .flatMap(target =>
+              gatherSubtypes(target.t).map(subtype =>
+                Assert(dispatch(subtype, target))(AssertSubtypeFailed(assign))
+              )
             )
-          )
-       */
+        )
       case other => Seq(other.rewriteDefault())
     }
   }
