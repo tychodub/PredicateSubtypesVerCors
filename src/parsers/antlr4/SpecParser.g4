@@ -444,7 +444,13 @@ valEmbedSubtype
 
 valSubtypeClause
  : langId
+ | langId '(' valSubtypeApplyArgs ')'
  ;
+
+valSubtypeApplyArgs
+  : langExpr
+  | langExpr ',' valSubtypeApplyArgs
+  ;
 
 valEmbedStatementBlock
  : startSpec valStatement* endSpec

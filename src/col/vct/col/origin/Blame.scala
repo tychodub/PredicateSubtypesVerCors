@@ -158,6 +158,16 @@ case class AssignFieldFailed(node: SilverFieldAssign[_])
     s"Insufficient permission for assignment `$source`."
 }
 
+case class AssignSubtypeFailed(node: Statement[_]) extends AssignFailed {
+  override def code: String = "assignSubtypeFailed"
+
+  override def descInContext: String =
+    "Failure to prove subtype predicate for assignment target."
+
+  override def inlineDescWithSource(source: String): String =
+    s"Failure to prove subtype for assignment `$source`."
+}
+
 case class CopyStructFailed(node: Expr[_], field: String)
     extends AssignFailed with NodeVerificationFailure {
   override def code: String = "copyStructFailed"

@@ -860,6 +860,15 @@ case class JavaToCol[G](
     t match {
       case ValSubtypeClause0(name) =>
         SubtypeApply(new UnresolvedRef(convert(name)), Seq())
+      case ValSubtypeClause1(name, _, exprList, _) =>
+        SubtypeApply(new UnresolvedRef(convert(name)), convert(exprList))
+    }
+
+  def convert(implicit t: ValSubtypeApplyArgsContext): Seq[Expr[G]] =
+    t match {
+      case ValSubtypeApplyArgs0(expr) => Seq(convert(expr))
+      case ValSubtypeApplyArgs1(expr, _, exprList) =>
+        Seq(convert(expr)).appendedAll(convert(exprList))
     }
 
   def convert(implicit t: ClassOrInterfaceTypeContext): JavaNamedType[G] =

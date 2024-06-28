@@ -2,13 +2,15 @@ package vct.rewrite
 
 import hre.util.ScopedStack
 import vct.col.ast._
-import vct.col.origin.{LabelContext, Origin, PreferredName}
-import vct.col.ref.Ref
-import vct.col.rewrite.InlineApplicables.InlineLetThisOrigin
+import vct.col.origin.{AssertFailed, AssignSubtypeFailed, Blame, Origin}
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
 import vct.col.util.Substitute
-import vct.rewrite.SubtypeFunctionArgRewrite.{Replacement, Replacements}
+import vct.rewrite.SubtypeFunctionArgRewrite.{
+  AssertSubtypeFailed,
+  Replacement,
+  Replacements,
+}
 
 import scala.collection.mutable
 
@@ -17,6 +19,14 @@ case object SubtypeFunctionArgRewrite extends RewriterBuilder {
 
   override def desc: String =
     "Transform predicate-subtype parameters in function signature to a function contract."
+
+  case class AssertSubtypeFailed(assign: Statement[_])
+      extends Blame[AssertFailed] {
+
+    override def blame(error: AssertFailed): Unit = {
+      assign.o.blame(AssignSubtypeFailed(assign))
+    }
+  }
 
   case class Replacement[Pre](replacing: Expr[Pre], binding: Expr[Pre])(
       implicit o: Origin
@@ -60,15 +70,15 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
       case TSubtype(refs, _) =>
         refs.map {
           case subtype: SubtypeApply[Pre] => subtype
-          case other => ???
+          case _ => ???
         }
       case _ => Seq()
     }
 
-  private def extractSupertype(varType: Type[Pre]): Type[Pre] =
+  override def dispatch(varType: Type[Pre]): Type[Post] =
     varType match {
-      case TSubtype(_, supertype) => supertype
-      case other => other
+      case TSubtype(_, supertype) => supertype.rewriteDefault()
+      case other => other.rewriteDefault()
     }
 
   def dispatch(e: Expr[Pre], annotated: Expr[Pre]): Expr[Post] =
@@ -79,7 +89,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
         inlineStack.having(apply) {
           lazy val args = Replacements(
             for (
-              (arg, v) <- apply.args.appended(annotated)
+              (arg, v) <- apply.args.prepended(annotated)
                 .zip(apply.ref.decl.args)
             )
               yield Replacement(v.get, arg)(v.o)
@@ -94,10 +104,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     implicit val o: Origin = decl.o
     decl match {
       case variable: Variable[Pre] =>
-        variables.succeed(
-          variable,
-          new Variable(dispatch(extractSupertype(variable.t))),
-        )
+        variables.succeed(variable, new Variable(dispatch(variable.t)))
 
       case method: InstanceMethod[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
@@ -110,7 +117,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
         classDeclarations.succeed(
           method,
           new InstanceMethod(
-            returnType = dispatch(extractSupertype(method.returnType)),
+            returnType = dispatch(method.returnType),
             args = variables.dispatch(method.args),
             outArgs = variables.dispatch(method.outArgs),
             typeArgs = variables.dispatch(method.typeArgs),
@@ -138,4 +145,38 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
       case other => super.dispatch(other)
     }
   }
+
+  private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {
+    implicit val o: Origin = stat.o
+    stat match {
+      case assign: Assign[Pre] =>
+        Seq(assign.rewriteDefault())
+          .appendedAll(gatherSubtypes(assign.target.t).map(subtype =>
+            Assert(dispatch(subtype, assign.target))(AssertSubtypeFailed(
+              assign
+            ))
+          ))
+      /*
+      case assign =>
+        assign.collect { case expr: AssignExpression[Pre] => expr.target }
+          .flatMap(target =>
+            gatherSubtypes(target.t).map(subtype =>
+              Assert(dispatch(subtype, target))(AssertSubtypeFailed(assign))
+            )
+          )
+       */
+      case other => Seq(other.rewriteDefault())
+    }
+  }
+
+  override def dispatch(stat: Statement[Pre]): Statement[Post] =
+    stat match {
+      case block: Block[Pre] =>
+        block.rewrite(statements =
+          block.statements.foldLeft(Seq(): Seq[Statement[Post]])((seq, stat) =>
+            seq.appendedAll(addAssert(stat))
+          )
+        )
+      case other => other.rewriteDefault()
+    }
 }
