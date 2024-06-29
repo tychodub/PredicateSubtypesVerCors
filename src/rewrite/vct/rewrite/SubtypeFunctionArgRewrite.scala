@@ -116,13 +116,8 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
           )
         classDeclarations.succeed(
           method,
-          new InstanceMethod(
-            returnType = dispatch(method.returnType),
-            args = variables.dispatch(method.args),
-            outArgs = variables.dispatch(method.outArgs),
-            typeArgs = variables.dispatch(method.typeArgs),
-            body = method.body.map(dispatch),
-            contract = method.contract.rewrite(
+          method.rewrite(contract =
+            method.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
                   gatherSubtypes(method.returnType)
@@ -135,10 +130,171 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
                 foldPredicate(argExpressions),
                 method.contract.requires.rewriteDefault(),
               ),
-            ),
-            method.inline,
-            method.pure,
-          )(method.blame)(method.o),
+            )
+          ),
+        )
+
+      case method: InstanceOperatorMethod[Pre] =>
+        val argExpressions: Seq[Expr[Post]] =
+          method.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        classDeclarations.succeed(
+          method,
+          method.rewrite(contract =
+            method.contract.rewrite(
+              ensures = SplitAccountedPredicate(
+                foldPredicate(
+                  gatherSubtypes(method.returnType)
+                    .map(subtype => dispatch(subtype, Result(method.ref)))
+                    .appended(tt)
+                ),
+                method.contract.ensures.rewriteDefault(),
+              ),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                method.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
+        )
+
+      case method: Constructor[Pre] =>
+        val argExpressions: Seq[Expr[Post]] =
+          method.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        classDeclarations.succeed(
+          method,
+          method.rewrite(contract =
+            method.contract.rewrite(
+              ensures = method.contract.ensures.rewriteDefault(),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                method.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
+        )
+
+      case method: InstanceFunction[Pre] =>
+        val argExpressions: Seq[Expr[Post]] =
+          method.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        classDeclarations.succeed(
+          method,
+          method.rewrite(contract =
+            method.contract.rewrite(
+              ensures = SplitAccountedPredicate(
+                foldPredicate(
+                  gatherSubtypes(method.returnType)
+                    .map(subtype => dispatch(subtype, Result(method.ref)))
+                    .appended(tt)
+                ),
+                method.contract.ensures.rewriteDefault(),
+              ),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                method.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
+        )
+
+      case method: InstanceOperatorFunction[Pre] =>
+        val argExpressions: Seq[Expr[Post]] =
+          method.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        classDeclarations.succeed(
+          method,
+          method.rewrite(contract =
+            method.contract.rewrite(
+              ensures = SplitAccountedPredicate(
+                foldPredicate(
+                  gatherSubtypes(method.returnType)
+                    .map(subtype => dispatch(subtype, Result(method.ref)))
+                    .appended(tt)
+                ),
+                method.contract.ensures.rewriteDefault(),
+              ),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                method.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
+        )
+
+      case function: Function[Pre] =>
+        val argExpressions: Seq[Expr[Post]] = {
+          function.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        }
+        globalDeclarations.succeed(
+          function,
+          function.rewrite(contract =
+            function.contract.rewrite(
+              ensures = SplitAccountedPredicate(
+                foldPredicate(
+                  gatherSubtypes(function.returnType)
+                    .map(subtype => dispatch(subtype, Result(function.ref)))
+                    .appended(tt)
+                ),
+                function.contract.ensures.rewriteDefault(),
+              ),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                function.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
+        )
+
+      case function: LlvmSpecFunction[Pre] =>
+        val argExpressions: Seq[Expr[Post]] = {
+          function.args.map(arg =>
+            gatherSubtypes(arg.t)
+              .map(subtype => dispatch(subtype, Local(arg.ref)))
+          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+            state.appendedAll(subtypes)
+          )
+        }
+        globalDeclarations.succeed(
+          function,
+          function.rewrite(contract =
+            function.contract.rewrite(
+              ensures = SplitAccountedPredicate(
+                foldPredicate(
+                  gatherSubtypes(function.returnType)
+                    .map(subtype => dispatch(subtype, Result(function.ref)))
+                    .appended(tt)
+                ),
+                function.contract.ensures.rewriteDefault(),
+              ),
+              requires = SplitAccountedPredicate(
+                foldPredicate(argExpressions),
+                function.contract.requires.rewriteDefault(),
+              ),
+            )
+          ),
         )
 
       case subtype: AbstractSubtype[Pre] => subtype.drop()
