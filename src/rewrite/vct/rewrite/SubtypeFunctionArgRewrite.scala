@@ -305,15 +305,16 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
   private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {
     implicit val o: Origin = stat.o
     stat match {
+      case loop: Loop[Pre] => Seq(dispatch(loop))
       case assign: Assign[Pre] =>
-        Seq(assign.rewriteDefault())
+        Seq(dispatch(assign))
           .appendedAll(gatherSubtypes(assign.target.t).map(subtype =>
             Assert(dispatch(subtype, assign.target))(AssertSubtypeFailed(
               assign
             ))
           ))
       case assign =>
-        Seq(assign.rewriteDefault()).appendedAll(
+        Seq(dispatch(assign)).appendedAll(
           assign.collect { case expr: AssignExpression[Pre] => expr.target }
             .flatMap(target =>
               gatherSubtypes(target.t).map(subtype =>
@@ -321,11 +322,12 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
               )
             )
         )
-      case other => Seq(other.rewriteDefault())
+      case other => Seq(dispatch(other))
     }
   }
 
-  override def dispatch(stat: Statement[Pre]): Statement[Post] =
+  override def dispatch(stat: Statement[Pre]): Statement[Post] = {
+    implicit val o: Origin = stat.o
     stat match {
       case block: Block[Pre] =>
         block.rewrite(statements =
@@ -333,6 +335,30 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
             seq.appendedAll(addAssert(stat))
           )
         )
+      case loop: Loop[Pre] =>
+        val subtypeExpressions = loop.init.collect { case assign: Assign[Pre] =>
+          assign.target
+        }.flatMap(target =>
+          gatherSubtypes(target.t).map(subtype => dispatch(subtype, target))
+        )
+
+        loop.rewrite(
+          init = loop.init.rewriteDefault(),
+          update = loop.update.rewriteDefault(),
+          contract = {
+            loop.contract match {
+              case invariant: LoopInvariant[Pre] =>
+                invariant.rewrite(
+                  invariant.invariant.rewriteDefault() &*
+                    subtypeExpressions
+                      .foldLeft(tt: Expr[Post])((state, expr) => state && expr)
+                )
+              case other => other.rewriteDefault()
+            }
+          },
+        )
+
       case other => other.rewriteDefault()
     }
+  }
 }
