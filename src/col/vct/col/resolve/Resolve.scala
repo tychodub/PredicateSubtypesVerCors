@@ -501,6 +501,7 @@ case object ResolveReferences extends LazyLogging {
         ctx.copy(currentInitializerType =
           Some(ctx.currentInitializerType.get match {
             case TArray(elem) => elem
+            case TSubtype(_, TArray(elem)) => elem
             case _ => throw WrongArrayInitializer(init)
           })
         )
@@ -1025,6 +1026,7 @@ case object ResolveReferences extends LazyLogging {
       case arr @ JavaLiteralArray(_) =>
         arr.typeContext = Some(ctx.currentInitializerType.get match {
           case t @ TArray(_) => t
+          case TSubtype(_, t @ TArray(_)) => t
           case _ => throw WrongArrayInitializer(arr)
         })
 
