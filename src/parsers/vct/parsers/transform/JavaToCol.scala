@@ -852,9 +852,22 @@ case class JavaToCol[G](
 
   def convert(implicit t: ValEmbedSubtypeContext): Seq[SubtypeApply[G]] =
     t match {
-      case ValEmbedSubtype0(_, subtypes, _) => subtypes.map(convert(_))
-      case ValEmbedSubtype1(subtypes) => subtypes.map(convert(_))
+      case ValEmbedSubtype0(_, subtypes, _) => subtypes.flatMap(convert(_))
+      case ValEmbedSubtype1(subtypes) => subtypes.flatMap(convert(_))
     }
+
+  def convert(implicit t: ValSubtypeOrContext): Seq[SubtypeApply[G]] =
+    t match {
+      case ValSubtypeOr0(head, _, tail) => convert(head) ++ convert(tail)
+      case ValSubtypeOr1(subtype) => convert(subtype)
+    } // Placeholder code
+
+  def convert(implicit t: ValSubtypeImpliesContext): Seq[SubtypeApply[G]] =
+    t match {
+      case ValSubtypeImplies0(head, _, tail) =>
+        Seq(convert(head)) ++ convert(tail)
+      case ValSubtypeImplies1(subtype) => Seq(convert(subtype))
+    } // Placeholder code
 
   def convert(implicit t: ValSubtypeClauseContext): SubtypeApply[G] =
     t match {

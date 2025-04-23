@@ -439,8 +439,18 @@ valEmbedContractBlock
  ;
 
 valEmbedSubtype
- : startSpec valSubtypeClause+ endSpec
- | {specLevel>0}? valSubtypeClause+
+ : startSpec valSubtypeOr+ endSpec
+ | {specLevel>0}? valSubtypeOr+
+ ;
+
+valSubtypeOr
+ : valSubtypeImplies '|' valSubtypeOr
+ | valSubtypeImplies
+ ;
+
+valSubtypeImplies
+ : valSubtypeClause IMPLIES valSubtypeImplies
+ | valSubtypeClause
  ;
 
 valSubtypeClause
