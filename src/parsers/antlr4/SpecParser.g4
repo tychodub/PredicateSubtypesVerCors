@@ -353,7 +353,7 @@ valType
  | 'pointer' '<' langType '>' # valPointerType
  | 'type' '<' langType '>' # valTypeType
  | 'either' '<' langType ',' langType '>' # valEitherType
- | 'subtype' '<' langType ',' valSubtypeClause+ '>' # valSubtype
+ | 'subtype' '<' langType ',' valSubtypeOr '>' # valSubtype
  ;
 
 valGlobalDeclaration
@@ -439,8 +439,8 @@ valEmbedContractBlock
  ;
 
 valEmbedSubtype
- : startSpec valSubtypeOr+ endSpec
- | {specLevel>0}? valSubtypeOr+
+ : startSpec valSubtypeOr endSpec
+ | {specLevel>0}? valSubtypeOr
  ;
 
 valSubtypeOr
@@ -449,8 +449,8 @@ valSubtypeOr
  ;
 
 valSubtypeImplies
- : valSubtypeClause IMPLIES valSubtypeImplies
- | valSubtypeClause
+ : valSubtypeClause+ IMPLIES valSubtypeImplies
+ | valSubtypeClause+
  ;
 
 valSubtypeClause

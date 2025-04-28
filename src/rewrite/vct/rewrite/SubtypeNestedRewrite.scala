@@ -1,7 +1,20 @@
 package vct.rewrite
 
 import hre.util.ScopedStack
-import vct.col.ast.{Apply, Class, ClassDeclaration, Declaration, Expr, InstanceSubtype, Let, Local, SubtypeApply, TSubtype, Type, Variable}
+import vct.col.ast.{
+  Apply,
+  Class,
+  ClassDeclaration,
+  Declaration,
+  Expr,
+  InstanceSubtype,
+  Let,
+  Local,
+  SubtypeApply,
+  TSubtype,
+  Type,
+  Variable,
+}
 import vct.col.origin.Origin
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
@@ -52,13 +65,19 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
   val inlineStack: ScopedStack[Apply[Pre]] = ScopedStack()
   val classOwner: mutable.Map[ClassDeclaration[Pre], Class[Pre]] = mutable.Map()
 
-  private def gatherSubtypes(varType: Type[Pre]): Seq[SubtypeApply[Pre]] =
+  private def gatherSubtypes(
+      varType: Type[Pre]
+  ): Seq[Seq[Seq[SubtypeApply[Pre]]]] =
     varType match {
       case TSubtype(refs, _) =>
-        refs.map {
-          case subtype: SubtypeApply[Pre] => subtype
-          case _ => ???
-        }
+        refs.map(or =>
+          or.map(implications =>
+            implications.map {
+              case subtype: SubtypeApply[Pre] => subtype
+              case _ => ???
+            }
+          )
+        )
       case _ => Seq()
     }
 
@@ -87,15 +106,21 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
     decl match {
       case subtype: InstanceSubtype[Pre] =>
         val subtypeVar = subtype.args.head
+
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
             Option(
-              gatherSubtypes(subtypeVar.t)
-                .map(subtype => dispatch(subtype, Local(subtypeVar.ref)))
-                .foldLeft(subtype.body.get.rewriteDefault(): Expr[Post])(
-                  (state, added) => state && added
-                )
+              subtype.body.get.rewriteDefault() &&
+                (if (gatherSubtypes(subtypeVar.t).nonEmpty) {
+                   gatherSubtypes(subtypeVar.t).map(implications =>
+                     implications.map(subtypes =>
+                       subtypes.map(subtype =>
+                         dispatch(subtype, Local(subtypeVar.ref))
+                       ).reduceLeft(_ && _)
+                     ).reduceRight(_ ==> _)
+                   ).reduceLeft(_ || _)
+                 } else { tt })
             )
           ),
         )
@@ -103,11 +128,4 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
     }
   }
 
-  @tailrec
-  private def getSupertype(t: Type[Pre]): Type[Pre] = {
-    t match {
-      case subtype: TSubtype[Pre] => getSupertype(subtype.supertype)
-      case other => other
-    }
-  }
 }

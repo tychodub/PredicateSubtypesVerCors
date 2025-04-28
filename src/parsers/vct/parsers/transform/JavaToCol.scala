@@ -850,24 +850,26 @@ case class JavaToCol[G](
         TSubtype(convert(subtypes), convert(supertype))
     }
 
-  def convert(implicit t: ValEmbedSubtypeContext): Seq[SubtypeApply[G]] =
+  def convert(
+      implicit t: ValEmbedSubtypeContext
+  ): Seq[Seq[Seq[SubtypeApply[G]]]] =
     t match {
-      case ValEmbedSubtype0(_, subtypes, _) => subtypes.flatMap(convert(_))
-      case ValEmbedSubtype1(subtypes) => subtypes.flatMap(convert(_))
+      case ValEmbedSubtype0(_, subtypes, _) => convert(subtypes)
+      case ValEmbedSubtype1(subtypes) => convert(subtypes)
     }
 
-  def convert(implicit t: ValSubtypeOrContext): Seq[SubtypeApply[G]] =
+  def convert(implicit t: ValSubtypeOrContext): Seq[Seq[Seq[SubtypeApply[G]]]] =
     t match {
-      case ValSubtypeOr0(head, _, tail) => convert(head) ++ convert(tail)
-      case ValSubtypeOr1(subtype) => convert(subtype)
-    } // Placeholder code
+      case ValSubtypeOr0(head, _, tail) => Seq(convert(head)) ++ convert(tail)
+      case ValSubtypeOr1(subtype) => Seq(convert(subtype))
+    }
 
-  def convert(implicit t: ValSubtypeImpliesContext): Seq[SubtypeApply[G]] =
+  def convert(implicit t: ValSubtypeImpliesContext): Seq[Seq[SubtypeApply[G]]] =
     t match {
       case ValSubtypeImplies0(head, _, tail) =>
-        Seq(convert(head)) ++ convert(tail)
-      case ValSubtypeImplies1(subtype) => Seq(convert(subtype))
-    } // Placeholder code
+        Seq(head.map(convert(_))) ++ convert(tail)
+      case ValSubtypeImplies1(subtypes) => Seq(subtypes.map(convert(_)))
+    }
 
   def convert(implicit t: ValSubtypeClauseContext): SubtypeApply[G] =
     t match {
@@ -2349,7 +2351,7 @@ case class JavaToCol[G](
       case ValEitherType(_, _, left, _, right, _) =>
         TEither(convert(left), convert(right))
       case ValSubtype(_, _, supertype, _, subtypes, _) =>
-        TSubtype(subtypes.map(convert(_)), convert(supertype))
+        TSubtype(convert(subtypes), convert(supertype))
     }
 
   def convert(implicit e: ValPrimarySeqContext): Expr[G] =

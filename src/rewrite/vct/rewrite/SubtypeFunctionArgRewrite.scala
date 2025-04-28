@@ -68,10 +68,14 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
   private def gatherSubtypes(varType: Type[Pre]): Seq[SubtypeApply[Pre]] =
     varType match {
       case TSubtype(refs, _) =>
-        refs.map {
-          case subtype: SubtypeApply[Pre] => subtype
-          case _ => ???
-        }
+        refs.map(or =>
+          or.map(implications =>
+            implications.map {
+              case subtype: SubtypeApply[Pre] => subtype
+              case _ => ???
+            }
+          )
+        ).flatten.flatten // temporary ignoring of structure for testing sake
       case _ => Seq()
     }
 
