@@ -110,18 +110,18 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
-            Option(
-              subtype.body.get.rewriteDefault() &&
-                (if (gatherSubtypes(subtypeVar.t).nonEmpty) {
-                   gatherSubtypes(subtypeVar.t).map(implications =>
-                     implications.map(subtypes =>
-                       subtypes.map(subtype =>
-                         dispatch(subtype, Local(subtypeVar.ref))
-                       ).reduceLeft(_ && _)
-                     ).reduceRight(_ ==> _)
-                   ).reduceLeft(_ || _)
-                 } else { tt })
-            )
+            Option((
+              if (gatherSubtypes(subtypeVar.t).nonEmpty) {
+                subtype.body.get.rewriteDefault() &&
+                gatherSubtypes(subtypeVar.t).map(implications =>
+                  implications.map(subtypes =>
+                    subtypes
+                      .map(subtype => dispatch(subtype, Local(subtypeVar.ref)))
+                      .reduceLeft(_ && _)
+                  ).reduceRight(_ ==> _)
+                ).reduceLeft(_ || _)
+              } else { subtype.body.get.rewriteDefault() }
+            ))
           ),
         )
       case other => super.dispatch(other)

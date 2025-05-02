@@ -65,7 +65,9 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
   val inlineStack: ScopedStack[Apply[Pre]] = ScopedStack()
   val classOwner: mutable.Map[ClassDeclaration[Pre], Class[Pre]] = mutable.Map()
 
-  private def gatherSubtypes(varType: Type[Pre]): Seq[SubtypeApply[Pre]] =
+  private def gatherSubtypes(
+      varType: Type[Pre]
+  ): Seq[Seq[Seq[SubtypeApply[Pre]]]] =
     varType match {
       case TSubtype(refs, _) =>
         refs.map(or =>
@@ -75,7 +77,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
               case _ => ???
             }
           )
-        ).flatten.flatten // temporary ignoring of structure for testing sake
+        )
       case _ => Seq()
     }
 
@@ -104,6 +106,34 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
       case other => other.rewriteDefault()
     }
 
+  private def subtypeAlgebraEvalLocal(
+      implicit o: Origin,
+      subtypeVar: Variable[Pre],
+  ): Expr[Post] = {
+    if (gatherSubtypes(subtypeVar.t).nonEmpty) {
+      gatherSubtypes(subtypeVar.t).map(implications =>
+        implications.map(subtypes =>
+          subtypes.map(subtype => dispatch(subtype, Local(subtypeVar.ref)))
+            .reduceLeft(_ && _)
+        ).reduceRight(_ ==> _)
+      ).reduceLeft(_ || _)
+    } else { tt }
+  }
+
+  private def subtypeAlgebraEvalResult(
+      implicit o: Origin,
+      subtypeVar: ContractApplicable[Pre],
+  ): Expr[Post] = {
+    if (gatherSubtypes(subtypeVar.returnType).nonEmpty) {
+      gatherSubtypes(subtypeVar.returnType).map(implications =>
+        implications.map(subtypes =>
+          subtypes.map(subtype => dispatch(subtype, Result(subtypeVar.ref)))
+            .reduceLeft(_ && _)
+        ).reduceRight(_ ==> _)
+      ).reduceLeft(_ || _)
+    } else { tt }
+  }
+
   override def dispatch(decl: Declaration[Pre]): Unit = {
     implicit val o: Origin = decl.o
     decl match {
@@ -112,21 +142,17 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case method: InstanceMethod[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
-          method.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          method.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtype) =>
+              state.appended(subtype)
+            )
         classDeclarations.succeed(
           method,
           method.rewrite(contract =
             method.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(method.returnType)
-                    .map(subtype => dispatch(subtype, Result(method.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, method)).appended(tt)
                 ),
                 method.contract.ensures.rewriteDefault(),
               ),
@@ -140,21 +166,17 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case method: InstanceOperatorMethod[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
-          method.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          method.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+              state.appended(subtypes)
+            )
         classDeclarations.succeed(
           method,
           method.rewrite(contract =
             method.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(method.returnType)
-                    .map(subtype => dispatch(subtype, Result(method.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, method)).appended(tt)
                 ),
                 method.contract.ensures.rewriteDefault(),
               ),
@@ -168,12 +190,10 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case method: Constructor[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
-          method.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          method.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+              state.appended(subtypes)
+            )
         classDeclarations.succeed(
           method,
           method.rewrite(contract =
@@ -189,21 +209,17 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case method: InstanceFunction[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
-          method.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          method.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+              state.appended(subtypes)
+            )
         classDeclarations.succeed(
           method,
           method.rewrite(contract =
             method.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(method.returnType)
-                    .map(subtype => dispatch(subtype, Result(method.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, method)).appended(tt)
                 ),
                 method.contract.ensures.rewriteDefault(),
               ),
@@ -217,21 +233,17 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case method: InstanceOperatorFunction[Pre] =>
         val argExpressions: Seq[Expr[Post]] =
-          method.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          method.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
+              state.appended(subtypes)
+            )
         classDeclarations.succeed(
           method,
           method.rewrite(contract =
             method.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(method.returnType)
-                    .map(subtype => dispatch(subtype, Result(method.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, method)).appended(tt)
                 ),
                 method.contract.ensures.rewriteDefault(),
               ),
@@ -245,12 +257,10 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case function: Function[Pre] =>
         val argExpressions: Seq[Expr[Post]] = {
-          function.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          function.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtype) =>
+              state.appended(subtype)
+            )
         }
         globalDeclarations.succeed(
           function,
@@ -258,9 +268,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
             function.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(function.returnType)
-                    .map(subtype => dispatch(subtype, Result(function.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, function)).appended(tt)
                 ),
                 function.contract.ensures.rewriteDefault(),
               ),
@@ -274,12 +282,10 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
       case function: LlvmSpecFunction[Pre] =>
         val argExpressions: Seq[Expr[Post]] = {
-          function.args.map(arg =>
-            gatherSubtypes(arg.t)
-              .map(subtype => dispatch(subtype, Local(arg.ref)))
-          ).foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtypes) =>
-            state.appendedAll(subtypes)
-          )
+          function.args.map(arg => subtypeAlgebraEvalLocal(o, arg))
+            .foldLeft(Seq(tt): Seq[Expr[Post]])((state, subtype) =>
+              state.appended(subtype)
+            )
         }
         globalDeclarations.succeed(
           function,
@@ -287,9 +293,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
             function.contract.rewrite(
               ensures = SplitAccountedPredicate(
                 foldPredicate(
-                  gatherSubtypes(function.returnType)
-                    .map(subtype => dispatch(subtype, Result(function.ref)))
-                    .appended(tt)
+                  Seq(subtypeAlgebraEvalResult(o, function)).appended(tt)
                 ),
                 function.contract.ensures.rewriteDefault(),
               ),
@@ -306,27 +310,47 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     }
   }
 
+  private def subtypeAlgebraEvalAssert(
+      implicit o: Origin,
+      subtypeVar: Assign[Pre],
+  ): Assert[Post] = {
+    Assert(
+      if (gatherSubtypes(subtypeVar.target.t).nonEmpty) {
+        gatherSubtypes(subtypeVar.target.t).map(implications =>
+          implications.map(subtypes =>
+            subtypes.map(subtype => dispatch(subtype, subtypeVar.target))
+              .reduceLeft(_ && _)
+          ).reduceRight(_ ==> _)
+        ).reduceLeft(_ || _)
+      } else
+        { tt }: Expr[Post]
+    )(AssertSubtypeFailed(subtypeVar))
+  }
+
   private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {
     implicit val o: Origin = stat.o
     stat match {
       case loop: Loop[Pre] => Seq(dispatch(loop))
       case assign: Assign[Pre] =>
-        Seq(dispatch(assign))
-          .appendedAll(gatherSubtypes(assign.target.t).map(subtype =>
-            Assert(dispatch(subtype, assign.target))(AssertSubtypeFailed(
-              assign
-            ))
-          ))
+        Seq(dispatch(assign)).appended(subtypeAlgebraEvalAssert(o, assign))
       case assign =>
         Seq(dispatch(assign)).appendedAll(
           assign.collect { case expr: AssignExpression[Pre] => expr.target }
-            .flatMap(target =>
-              gatherSubtypes(target.t).map(subtype =>
-                Assert(dispatch(subtype, target))(AssertSubtypeFailed(assign))
-              )
+            .map(target =>
+              Assert(
+                if (gatherSubtypes(target.t).nonEmpty) {
+                  gatherSubtypes(target.t).map(implications =>
+                    implications.map(subtypes =>
+                      subtypes.map(subtype => dispatch(subtype, target))
+                        .reduceLeft(_ && _)
+                    ).reduceRight(_ ==> _)
+                  ).reduceLeft(_ || _)
+                } else
+                  { tt }: Expr[Post]
+              )(AssertSubtypeFailed(assign))
             )
         )
-      case other => Seq(dispatch(other))
+      case other => Seq(dispatch(other)) // I think this is unreachable
     }
   }
 
@@ -340,10 +364,17 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
           )
         )
       case loop: Loop[Pre] =>
-        val subtypeExpressions = loop.init.collect { case assign: Assign[Pre] =>
-          assign.target
-        }.flatMap(target =>
-          gatherSubtypes(target.t).map(subtype => dispatch(subtype, target))
+        val subtypeExpressions: LazyList[Expr[Post]] = loop.init.collect {
+          case assign: Assign[Pre] => assign.target
+        }.map(target =>
+          if (gatherSubtypes(target.t).nonEmpty) {
+            gatherSubtypes(target.t).map(implications =>
+              implications.map(subtypes =>
+                subtypes.map(subtype => dispatch(subtype, target))
+                  .reduceLeft(_ && _)
+              ).reduceRight(_ ==> _)
+            ).reduceLeft(_ || _)
+          } else { tt }
         )
 
         loop.rewrite(
