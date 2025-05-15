@@ -185,6 +185,7 @@ OPTION_NONE: 'None';
 WRITE: 'write';
 READ: 'read';
 EMPTY: 'empty';
+STRICT: 'strict';
 
 COALESCE: '?.';
 FRAC_DIV: '\\';

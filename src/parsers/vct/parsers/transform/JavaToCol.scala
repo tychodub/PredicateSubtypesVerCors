@@ -850,25 +850,39 @@ case class JavaToCol[G](
         TSubtype(convert(subtypes), convert(supertype))
     }
 
-  def convert(
-      implicit t: ValEmbedSubtypeContext
-  ): Seq[Seq[Seq[SubtypeApply[G]]]] =
+  def convert(implicit t: ValEmbedSubtypeContext): Expr[G] =
     t match {
-      case ValEmbedSubtype0(_, subtypes, _) => convert(subtypes)
-      case ValEmbedSubtype1(subtypes) => convert(subtypes)
+      case ValEmbedSubtype0(_, strict, subtypes, _) => convert(subtypes)
+      case ValEmbedSubtype1(strict, subtypes) => convert(subtypes)
     }
 
-  def convert(implicit t: ValSubtypeOrContext): Seq[Seq[Seq[SubtypeApply[G]]]] =
+  def convert(implicit t: ValSubtypeOrContext): Expr[G] =
     t match {
-      case ValSubtypeOr0(head, _, tail) => Seq(convert(head)) ++ convert(tail)
-      case ValSubtypeOr1(subtype) => Seq(convert(subtype))
+      case ValSubtypeOr0(head, _, tail) => convert(head) || convert(tail)
+      case ValSubtypeOr1(subtype) => convert(subtype)
     }
 
-  def convert(implicit t: ValSubtypeImpliesContext): Seq[Seq[SubtypeApply[G]]] =
+  def convert(implicit t: ValSubtypeImpliesContext): Expr[G] =
     t match {
-      case ValSubtypeImplies0(head, _, tail) =>
-        Seq(head.map(convert(_))) ++ convert(tail)
-      case ValSubtypeImplies1(subtypes) => Seq(subtypes.map(convert(_)))
+      case ValSubtypeImplies0(init, _, end) =>
+        init.map(convert(_)).reduceRight(_ ==> _) ==> convert(end)
+      case ValSubtypeImplies1(_, init, _, _, end) =>
+        convert(init) ==> convert(end)
+      case ValSubtypeImplies2(subtypes) =>
+        subtypes.map(convert(_)).reduceLeft(_ && _)
+    }
+
+  def convert(implicit t: ValSubtypeAndContext): Expr[G] =
+    t match {
+      case ValSubtypeAnd0(_, subtype, _) => convert(subtype)
+      case ValSubtypeAnd1(subtype) => convert(subtype)
+    }
+
+  def convert(implicit t: ValSubtypeNegationContext): Expr[G] =
+    t match {
+      case ValSubtypeNegation0(_, _, subtype, _) => Not(convert(subtype))
+      case ValSubtypeNegation1(_, subtype) => Not(convert(subtype))
+      case ValSubtypeNegation2(subtype) => convert(subtype)
     }
 
   def convert(implicit t: ValSubtypeClauseContext): SubtypeApply[G] =
@@ -2350,7 +2364,7 @@ case class JavaToCol[G](
       case ValTypeType(_, _, element, _) => TType(convert(element))
       case ValEitherType(_, _, left, _, right, _) =>
         TEither(convert(left), convert(right))
-      case ValSubtype(_, _, supertype, _, subtypes, _) =>
+      case ValSubtype(_, _, supertype, _, _, subtypes, _) =>
         TSubtype(convert(subtypes), convert(supertype))
     }
 
