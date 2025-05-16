@@ -69,7 +69,7 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
       varType: Type[Pre]
   ): Seq[Seq[Seq[SubtypeApply[Pre]]]] =
     varType match {
-      case TSubtype(refs, _) =>
+      case TSubtype(refs, _, _) =>
         refs.map(or =>
           or.map(implications =>
             implications.map {

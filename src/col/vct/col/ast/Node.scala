@@ -136,7 +136,7 @@ final case class TType[G](t: Type[G])(implicit val o: Origin = DiagnosticOrigin)
 final case class TVar[G](ref: Ref[G, Variable[G]])(
     implicit val o: Origin = DiagnosticOrigin
 ) extends Type[G] with TVarImpl[G]
-final case class TSubtype[G](refs: Expr[G], supertype: Type[G])(
+final case class TSubtype[G](refs: Expr[G], supertype: Type[G], strict: Boolean)(
     implicit val o: Origin = DiagnosticOrigin
 ) extends Type[G] with TSubtypeImpl[G]
 final case class SubtypeApply[G](

@@ -847,13 +847,16 @@ case class JavaToCol[G](
           convert(element),
         )
       case Type3(subtypes, supertype) =>
-        TSubtype(convert(subtypes), convert(supertype))
+        val (subtypesExpr, strict) = convert(subtypes)
+        TSubtype(subtypesExpr, convert(supertype), strict)
     }
 
-  def convert(implicit t: ValEmbedSubtypeContext): Expr[G] =
+  def convert(implicit t: ValEmbedSubtypeContext): (Expr[G], Boolean) =
     t match {
-      case ValEmbedSubtype0(_, strict, subtypes, _) => convert(subtypes)
-      case ValEmbedSubtype1(strict, subtypes) => convert(subtypes)
+      case ValEmbedSubtype0(_, strict, subtypes, _) =>
+        (convert(subtypes), strict.nonEmpty)
+      case ValEmbedSubtype1(strict, subtypes) =>
+        (convert(subtypes), strict.nonEmpty)
     }
 
   def convert(implicit t: ValSubtypeOrContext): Expr[G] =
@@ -2364,8 +2367,8 @@ case class JavaToCol[G](
       case ValTypeType(_, _, element, _) => TType(convert(element))
       case ValEitherType(_, _, left, _, right, _) =>
         TEither(convert(left), convert(right))
-      case ValSubtype(_, _, supertype, _, _, subtypes, _) =>
-        TSubtype(convert(subtypes), convert(supertype))
+      case ValSubtype(_, _, supertype, _, strict, subtypes, _) =>
+        TSubtype(convert(subtypes), convert(supertype), strict.nonEmpty)
     }
 
   def convert(implicit e: ValPrimarySeqContext): Expr[G] =

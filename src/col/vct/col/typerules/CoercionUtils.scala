@@ -114,10 +114,10 @@ case object CoercionUtils {
           innerSource,
           innerTarget,
         )
-      case (TSubtype(_, supertype), typeRight)
+      case (TSubtype(_, supertype, _), typeRight)
           if (typeRight.superTypeOf(supertype)) =>
         CoerceSubtypeSupertype(typeRight)
-      case (typeLeft, TSubtype(_, supertype))
+      case (typeLeft, TSubtype(_, supertype, _))
           if (supertype.superTypeOf(typeLeft)) =>
         CoerceSupertypeSubtype(typeLeft)
 
@@ -331,7 +331,7 @@ case object CoercionUtils {
           .map { case CSpecificationType(inner) =>
             (CoerceCPrimitiveToCol(t, inner), inner)
           }
-      case TSubtype(_, supertype) => getAnyCCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyCCoercion(supertype)
       case _ => None
     }
 
@@ -356,7 +356,7 @@ case object CoercionUtils {
           .map { case CPPSpecificationType(inner) =>
             (CoerceCPPPrimitiveToCol(t, inner), inner)
           }
-      case TSubtype(_, supertype) => getAnyCPPCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyCPPCoercion(supertype)
       case _ => None
     }
 
@@ -379,7 +379,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySeqCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnySeqCoercion)
       case t: TSeq[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySeqCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySeqCoercion(supertype)
       case _ => None
     }
 
@@ -388,7 +388,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySetCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnySetCoercion)
       case t: TSet[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySetCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySetCoercion(supertype)
       case _ => None
     }
 
@@ -409,7 +409,7 @@ case object CoercionUtils {
           TVector(t.size, t.innerType)(),
         ))
       case t: TVector[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyVectorCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyVectorCoercion(supertype)
       case _ => None
     }
 
@@ -418,7 +418,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyBagCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyBagCoercion)
       case t: TBag[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyBagCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyBagCoercion(supertype)
       case _ => None
     }
 
@@ -432,7 +432,7 @@ case object CoercionUtils {
       case t: TSet[G] => Some((CoerceIdentity(source), t))
       case t: TBag[G] => Some((CoerceIdentity(source), t))
       case t: TMap[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySizedCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySizedCoercion(supertype)
       case _ => None
     }
 
@@ -452,7 +452,7 @@ case object CoercionUtils {
       case _: TNull[G] =>
         val t = TPointer[G](TAnyValue())
         Some((CoerceNullPointer(t), t))
-      case TSubtype(_, supertype) => getAnyPointerCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyPointerCoercion(supertype)
       case _ => None
     }
 
@@ -462,7 +462,7 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyCArrayCoercion)
       case t: CTArray[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyCArrayCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyCArrayCoercion(supertype)
       case _ => None
     }
 
@@ -472,7 +472,7 @@ case object CoercionUtils {
     source match {
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyCPPArrayCoercion)
       case t: CPPTArray[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyCPPArrayCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyCPPArrayCoercion(supertype)
       case _ => None
     }
 
@@ -498,7 +498,7 @@ case object CoercionUtils {
       case _: TNull[G] =>
         val t = TArray[G](TAnyValue())
         Some((CoerceNullArray(t), t))
-      case TSubtype(_, supertype) => getAnyArrayCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyArrayCoercion(supertype)
       case _ => None
     }
 
@@ -526,7 +526,7 @@ case object CoercionUtils {
       case TNull() =>
         val t = TArray[G](TArray[G](TAnyValue()))
         Some((CoerceNullArray(t), t))
-      case TSubtype(_, supertype) => getAnyMatrixArrayCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyMatrixArrayCoercion(supertype)
       case _ => None
     }
 
@@ -537,7 +537,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyOptionCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyOptionCoercion)
       case t: TOption[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyOptionCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyOptionCoercion(supertype)
       case _ => None
     }
 
@@ -546,7 +546,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyMapCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyMapCoercion)
       case t: TMap[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyMapCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyMapCoercion(supertype)
       case _ => None
     }
 
@@ -557,7 +557,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyTupleCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyTupleCoercion)
       case t: TTuple[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyTupleCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyTupleCoercion(supertype)
       case _ => None
     }
 
@@ -568,7 +568,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyMatrixCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyMatrixCoercion)
       case t: TMatrix[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyMatrixCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyMatrixCoercion(supertype)
       case _ => None
     }
 
@@ -579,7 +579,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyModelCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyModelCoercion)
       case t: TModel[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyModelCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyModelCoercion(supertype)
       case _ => None
     }
 
@@ -606,7 +606,7 @@ case object CoercionUtils {
             Some((joinedCoercion, target))
           case None => None
         }
-      case TSubtype(_, supertype) => getAnyClassCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyClassCoercion(supertype)
       case _ => None
     }
 
@@ -617,7 +617,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyEitherCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyEitherCoercion)
       case t: TEither[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyEitherCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyEitherCoercion(supertype)
       case _ => None
     }
 
@@ -628,7 +628,7 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyBitvecCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyBitvecCoercion)
       case t: TSmtlibBitVector[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnyBitvecCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnyBitvecCoercion(supertype)
       case _ => None
     }
 
@@ -640,7 +640,7 @@ case object CoercionUtils {
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibFloatCoercion)
       case t: TSmtlibFloatingPoint[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySmtlibFloatCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySmtlibFloatCoercion(supertype)
       case _ => None
     }
 
@@ -652,7 +652,7 @@ case object CoercionUtils {
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibArrayCoercion)
       case t: TSmtlibArray[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySmtlibArrayCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySmtlibArrayCoercion(supertype)
       case _ => None
     }
 
@@ -664,7 +664,7 @@ case object CoercionUtils {
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibSeqCoercion)
       case t: TSmtlibSeq[G] => Some((CoerceIdentity(source), t))
-      case TSubtype(_, supertype) => getAnySmtlibSeqCoercion(supertype)
+      case TSubtype(_, supertype, _) => getAnySmtlibSeqCoercion(supertype)
       case _ => None
     }
 }

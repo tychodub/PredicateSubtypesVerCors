@@ -67,13 +67,13 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
 
   private def gatherSubtypes(varType: Type[Pre]): Expr[Pre] =
     varType match {
-      case TSubtype(refs, _) => refs
+      case TSubtype(refs, _, _) => refs
       case _ => tt
     }
 
   override def dispatch(varType: Type[Pre]): Type[Post] =
     varType match {
-      case TSubtype(_, supertype) => supertype.rewriteDefault()
+      case TSubtype(_, supertype, _) => supertype.rewriteDefault()
       case other => other.rewriteDefault()
     }
 
