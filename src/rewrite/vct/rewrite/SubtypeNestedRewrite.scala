@@ -2,14 +2,18 @@ package vct.rewrite
 
 import hre.util.ScopedStack
 import vct.col.ast.{
+  And,
   Apply,
   Class,
   ClassDeclaration,
   Declaration,
   Expr,
+  Implies,
   InstanceSubtype,
   Let,
   Local,
+  Not,
+  Or,
   SubtypeApply,
   TSubtype,
   Type,
@@ -65,21 +69,32 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
   val inlineStack: ScopedStack[Apply[Pre]] = ScopedStack()
   val classOwner: mutable.Map[ClassDeclaration[Pre], Class[Pre]] = mutable.Map()
 
-  private def gatherSubtypes(
-      varType: Type[Pre]
-  ): Seq[Seq[Seq[SubtypeApply[Pre]]]] =
+  private def gatherSubtypes(varType: Type[Pre]): Expr[Pre] =
     varType match {
-      case TSubtype(refs, _, _) =>
-        refs.map(or =>
-          or.map(implications =>
-            implications.map {
-              case subtype: SubtypeApply[Pre] => subtype
-              case _ => ???
-            }
-          )
-        )
-      case _ => Seq()
+      case TSubtype(refs, _, _) => refs
+      case _ => tt
     }
+
+  private def subtypeAlgebraEval(
+      implicit o: Origin,
+      subtypeExpr: Expr[Pre],
+      subtypeVar: Expr[Pre],
+  ): Expr[Post] = {
+    subtypeExpr match {
+      case subtype: SubtypeApply[Pre] => dispatch(subtype, subtypeVar)
+      case and: And[Pre] =>
+        subtypeAlgebraEval(o, and.left, subtypeVar) &&
+        subtypeAlgebraEval(o, and.right, subtypeVar)
+      case or: Or[Pre] =>
+        subtypeAlgebraEval(o, or.left, subtypeVar) ||
+        subtypeAlgebraEval(o, or.right, subtypeVar)
+      case implies: Implies[Pre] =>
+        subtypeAlgebraEval(o, implies.left, subtypeVar) ==>
+          subtypeAlgebraEval(o, implies.right, subtypeVar)
+      case not: Not[Pre] => Not(subtypeAlgebraEval(o, not.arg, subtypeVar))
+      case other => other.rewriteDefault()
+    }
+  }
 
   def dispatch(e: Expr[Pre], annotated: Expr[Pre]): Expr[Post] =
     e match {
@@ -110,18 +125,13 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
-            Option((
-              if (gatherSubtypes(subtypeVar.t).nonEmpty) {
-                subtype.body.get.rewriteDefault() &&
-                gatherSubtypes(subtypeVar.t).map(implications =>
-                  implications.map(subtypes =>
-                    subtypes
-                      .map(subtype => dispatch(subtype, Local(subtypeVar.ref)))
-                      .reduceLeft(_ && _)
-                  ).reduceRight(_ ==> _)
-                ).reduceLeft(_ || _)
-              } else { subtype.body.get.rewriteDefault() }
-            ))
+            Option(
+              subtype.body.get.rewriteDefault() && subtypeAlgebraEval(
+                o,
+                gatherSubtypes(subtypeVar.t),
+                Local(subtypeVar.ref),
+              )
+            )
           ),
         )
       case other => super.dispatch(other)
