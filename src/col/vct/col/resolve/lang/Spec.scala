@@ -7,6 +7,8 @@ import vct.col.resolve._
 import vct.col.resolve.ctx._
 import vct.result.VerificationError.UserError
 
+import scala.annotation.tailrec
+
 case object Spec {
   def getContract[G](
       target: Referrable[G],
@@ -80,32 +82,40 @@ case object Spec {
       blame: Blame[BuiltinError],
   ): Option[BuiltinField[G]] = {
     implicit val o: Origin = obj.o
-    Some(BuiltinField((obj.t, field) match {
-      case (TArray(_), "length") => Length(_)(blame)
 
-      case (_: SizedType[G], "isEmpty") => Empty(_)
-      case (_: SizedType[G], "size") => Size(_)
+    @tailrec
+    def matchBuiltin(t: Type[G], field: String): Option[Expr[G] => Expr[G]] = {
+      (t, field) match {
+        case (TSubtype(_, supertype, _), field) =>
+          matchBuiltin(supertype, field)
 
-      case (TSeq(_), "head") => Head(_)(blame)
-      case (TSeq(_), "tail") => Tail(_)
+        case (TArray(_), "length") => Some(Length(_)(blame))
 
-      case (TMap(_, _), "values") => MapValueSet(_)
-      case (TMap(_, _), "items") => MapItemSet(_)
-      case (TMap(_, _), "keys") => MapKeySet(_)
+        case (_: SizedType[G], "isEmpty") => Some(Empty(_))
+        case (_: SizedType[G], "size") => Some(Size(_))
 
-      case (TOption(_), "get") => OptGet(_)(blame)
-      case (TOption(_), "isEmpty") => OptEmpty(_)
+        case (TSeq(_), "head") => Some(Head(_)(blame))
+        case (TSeq(_), "tail") => Some(Tail(_))
 
-      case (TTuple(_), "fst") => TupGet(_, 0)
-      case (TTuple(_), "snd") => TupGet(_, 1)
+        case (TMap(_, _), "values") => Some(MapValueSet(_))
+        case (TMap(_, _), "items") => Some(MapItemSet(_))
+        case (TMap(_, _), "keys") => Some(MapKeySet(_))
 
-      case (TEither(_, _), "left") => GetLeft(_)(blame)
-      case (TEither(_, _), "right") => GetRight(_)(blame)
-      case (TEither(_, _), "isLeft") => IsLeft(_)
-      case (TEither(_, _), "isRight") => IsRight(_)
+        case (TOption(_), "get") => Some(OptGet(_)(blame))
+        case (TOption(_), "isEmpty") => Some(OptEmpty(_))
 
-      case _ => return None
-    }))
+        case (TTuple(_), "fst") => Some(TupGet(_, 0))
+        case (TTuple(_), "snd") => Some(TupGet(_, 1))
+
+        case (TEither(_, _), "left") => Some(GetLeft(_)(blame))
+        case (TEither(_, _), "right") => Some(GetRight(_)(blame))
+        case (TEither(_, _), "isLeft") => Some(IsLeft(_))
+        case (TEither(_, _), "isRight") => Some(IsRight(_))
+
+        case _ => None
+      }
+    }
+    matchBuiltin(obj.t, field).map(BuiltinField(_))
   }
 
   def argCount[G](
@@ -124,88 +134,105 @@ case object Spec {
       blame: Blame[BuiltinError],
   ): Option[BuiltinInstanceMethod[G]] = {
     implicit val o: Origin = obj.o
-    Some(BuiltinInstanceMethod((obj.t, method) match {
-      case (t: TNotAValue[G], _) =>
-        (t.decl.get, method) match {
-          case (RefModel(model), "create") => _ => _ => ModelNew(model.ref)
-          case (_, _) => return None
-        }
 
-      case (TModel(_), "state") =>
-        argCount(2)(obj => args => ModelState(obj, args(0), args(1)))
-      case (TModel(_), "abstractState") =>
-        argCount(1)(obj => args => ModelAbstractState(obj, args.head))
-      case (TModel(_), "create") =>
-        argCount(1)(obj => args => ModelCreate(obj, args.head))
-      case (TModel(_), "destroy") => argCount(0)(obj => _ => ModelDestroy(obj))
-      case (TModel(_), "split") =>
-        argCount(4)(obj =>
-          args => ModelSplit(obj, args(0), args(1), args(2), args(3))
-        )
-      case (TModel(_), "merge") =>
-        argCount(4)(obj =>
-          args => ModelMerge(obj, args(0), args(1), args(2), args(3))
-        )
-      case (TModel(_), "choose") =>
-        argCount(3)(obj => args => ModelChoose(obj, args(0), args(1), args(2)))
+    def matchBuiltin(
+        t: Type[G],
+        method: String,
+    ): Option[Expr[G] => Seq[Expr[G]] => Expr[G]] = {
+      (t, method) match {
+        case (t: TNotAValue[G], _) =>
+          (t.decl.get, method) match {
+            case (RefModel(model), "create") =>
+              Some(_ => _ => ModelNew(model.ref))
+            case (_, _) => None
+          }
 
-      case (TSeq(_), "removeAt") =>
-        argCount(1)(obj => args => RemoveAt(obj, args.head))
-      case (TSeq(_), "concat") =>
-        argCount(1)(obj => args => Concat(obj, args.head))
-      case (TSeq(_), "prepend") =>
-        argCount(1)(obj => args => Cons(obj, args.head))
-      case (TSeq(_), "drop") => argCount(1)(obj => args => Drop(obj, args.head))
-      case (TSeq(_), "take") => argCount(1)(obj => args => Take(obj, args.head))
-      case (TSeq(_), "slice") =>
-        argCount(2)(obj => args => Slice(obj, args(0), args(1)))
-      case (TSeq(_), "update") =>
-        argCount(2)(obj => args => SeqUpdate(obj, args(0), args(1)))
-      case (TSeq(_), "contains") =>
-        argCount(1)(obj => args => SeqMember(args.head, obj))
+        case (TSubtype(_, supertype, _), method) =>
+          matchBuiltin(supertype, method)
 
-      case (TSet(_), "intersect") =>
-        argCount(1)(obj => args => SetIntersection(obj, args.head))
-      case (TSet(_), "contains") =>
-        argCount(1)(obj => args => SetMember(args.head, obj))
-      case (TSet(_), "difference") =>
-        argCount(1)(obj => args => SetMinus(obj, args.head))
-      case (TSet(_), "union") =>
-        argCount(1)(obj => args => SetUnion(obj, args.head))
-      case (TSet(_), "strictSubsetOf") =>
-        argCount(1)(obj => args => SubSet(obj, args.head))
-      case (TSet(_), "subsetOf") =>
-        argCount(1)(obj => args => SubSetEq(obj, args.head))
+        case (TModel(_), "state") =>
+          Some(argCount(2)(obj => args => ModelState(obj, args(0), args(1))))
+        case (TModel(_), "abstractState") =>
+          Some(argCount(1)(obj => args => ModelAbstractState(obj, args.head)))
+        case (TModel(_), "create") =>
+          Some(argCount(1)(obj => args => ModelCreate(obj, args.head)))
+        case (TModel(_), "destroy") =>
+          Some(argCount(0)(obj => _ => ModelDestroy(obj)))
+        case (TModel(_), "split") =>
+          Some(argCount(4)(obj =>
+            args => ModelSplit(obj, args(0), args(1), args(2), args(3))
+          ))
+        case (TModel(_), "merge") =>
+          Some(argCount(4)(obj =>
+            args => ModelMerge(obj, args(0), args(1), args(2), args(3))
+          ))
+        case (TModel(_), "choose") =>
+          Some(argCount(3)(obj =>
+            args => ModelChoose(obj, args(0), args(1), args(2))
+          ))
 
-      case (TBag(_), "sum") =>
-        argCount(1)(obj => args => BagAdd(obj, args.head))
-      case (TBag(_), "intersect") =>
-        argCount(1)(obj => args => BagLargestCommon(obj, args.head))
-      case (TBag(_), "count") =>
-        argCount(1)(obj => args => BagMemberCount(args.head, obj))
-      case (TBag(_), "difference") =>
-        argCount(1)(obj => args => BagMinus(obj, args.head))
-      case (TBag(_), "subbagOf") =>
-        argCount(1)(obj => args => SubBagEq(obj, args.head))
-      case (TBag(_), "strictSubbagOf") =>
-        argCount(1)(obj => args => SubBag(obj, args.head))
+        case (TSeq(_), "removeAt") =>
+          Some(argCount(1)(obj => args => RemoveAt(obj, args.head)))
+        case (TSeq(_), "concat") =>
+          Some(argCount(1)(obj => args => Concat(obj, args.head)))
+        case (TSeq(_), "prepend") =>
+          Some(argCount(1)(obj => args => Cons(obj, args.head)))
+        case (TSeq(_), "drop") =>
+          Some(argCount(1)(obj => args => Drop(obj, args.head)))
+        case (TSeq(_), "take") =>
+          Some(argCount(1)(obj => args => Take(obj, args.head)))
+        case (TSeq(_), "slice") =>
+          Some(argCount(2)(obj => args => Slice(obj, args(0), args(1))))
+        case (TSeq(_), "update") =>
+          Some(argCount(2)(obj => args => SeqUpdate(obj, args(0), args(1))))
+        case (TSeq(_), "contains") =>
+          Some(argCount(1)(obj => args => SeqMember(args.head, obj)))
 
-      case (TMap(_, _), "add") =>
-        argCount(2)(obj => args => MapCons(obj, args(0), args(1)))
-      case (TMap(_, _), "remove") =>
-        argCount(1)(obj => args => MapRemove(obj, args.head))
-      case (TMap(_, _), "get") =>
-        argCount(1)(obj => args => MapGet(obj, args.head)(blame))
-      case (TMap(_, _), "equals") =>
-        argCount(1)(obj => args => MapEq(obj, args.head))
-      case (TMap(_, _), "disjoint") =>
-        argCount(1)(obj => args => MapDisjoint(obj, args.head))
+        case (TSet(_), "intersect") =>
+          Some(argCount(1)(obj => args => SetIntersection(obj, args.head)))
+        case (TSet(_), "contains") =>
+          Some(argCount(1)(obj => args => SetMember(args.head, obj)))
+        case (TSet(_), "difference") =>
+          Some(argCount(1)(obj => args => SetMinus(obj, args.head)))
+        case (TSet(_), "union") =>
+          Some(argCount(1)(obj => args => SetUnion(obj, args.head)))
+        case (TSet(_), "strictSubsetOf") =>
+          Some(argCount(1)(obj => args => SubSet(obj, args.head)))
+        case (TSet(_), "subsetOf") =>
+          Some(argCount(1)(obj => args => SubSetEq(obj, args.head)))
 
-      case (TOption(_), "getOrElse") =>
-        argCount(1)(obj => args => OptGetOrElse(obj, args.head))
+        case (TBag(_), "sum") =>
+          Some(argCount(1)(obj => args => BagAdd(obj, args.head)))
+        case (TBag(_), "intersect") =>
+          Some(argCount(1)(obj => args => BagLargestCommon(obj, args.head)))
+        case (TBag(_), "count") =>
+          Some(argCount(1)(obj => args => BagMemberCount(args.head, obj)))
+        case (TBag(_), "difference") =>
+          Some(argCount(1)(obj => args => BagMinus(obj, args.head)))
+        case (TBag(_), "subbagOf") =>
+          Some(argCount(1)(obj => args => SubBagEq(obj, args.head)))
+        case (TBag(_), "strictSubbagOf") =>
+          Some(argCount(1)(obj => args => SubBag(obj, args.head)))
 
-      case (_, _) => return None
-    }))
+        case (TMap(_, _), "add") =>
+          Some(argCount(2)(obj => args => MapCons(obj, args(0), args(1))))
+        case (TMap(_, _), "remove") =>
+          Some(argCount(1)(obj => args => MapRemove(obj, args.head)))
+        case (TMap(_, _), "get") =>
+          Some(argCount(1)(obj => args => MapGet(obj, args.head)(blame)))
+        case (TMap(_, _), "equals") =>
+          Some(argCount(1)(obj => args => MapEq(obj, args.head)))
+        case (TMap(_, _), "disjoint") =>
+          Some(argCount(1)(obj => args => MapDisjoint(obj, args.head)))
+
+        case (TOption(_), "getOrElse") =>
+          Some(argCount(1)(obj => args => OptGetOrElse(obj, args.head)))
+
+        case (_, _) => None
+      }
+    }
+
+    matchBuiltin(obj.t, method).map(BuiltinInstanceMethod(_))
   }
 
   def findLabel[G](
