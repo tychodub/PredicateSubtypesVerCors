@@ -6,11 +6,7 @@ import vct.col.origin.{AssertFailed, AssignSubtypeFailed, Blame, Origin}
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
 import vct.col.util.Substitute
-import vct.rewrite.SubtypeFunctionArgRewrite.{
-  AssertSubtypeFailed,
-  Replacement,
-  Replacements,
-}
+import vct.rewrite.SubtypeFunctionArgRewrite.AssertSubtypeFailed
 
 import scala.collection.mutable
 
@@ -25,36 +21,6 @@ case object SubtypeFunctionArgRewrite extends RewriterBuilder {
 
     override def blame(error: AssertFailed): Unit = {
       assign.o.blame(AssignSubtypeFailed(assign))
-    }
-  }
-
-  case class Replacement[Pre](replacing: Expr[Pre], binding: Expr[Pre])(
-      implicit o: Origin
-  ) {
-    val withVariable: Variable[Pre] = new Variable(replacing.t)
-
-    def +(other: Replacements[Pre]): Replacements[Pre] =
-      Replacements(Seq(this)) + other
-
-    def +(other: Replacement[Pre]): Replacements[Pre] =
-      Replacements(Seq(this)) + other
-  }
-
-  case class Replacements[Pre](replacements: Seq[Replacement[Pre]]) {
-    def +(other: Replacements[Pre]): Replacements[Pre] =
-      Replacements(replacements ++ other.replacements)
-
-    def +(other: Replacement[Pre]): Replacements[Pre] =
-      Replacements(replacements :+ other)
-
-    def expr(e: Expr[Pre])(implicit o: Origin): Expr[Pre] = {
-      val sub = Substitute[Pre](
-        replacements.map(r => r.replacing -> r.withVariable.get).toMap
-      )
-      val replaced = sub.labelDecls.scope { sub.dispatch(e) }
-      replacements.foldRight(replaced) { case (replacement, e) =>
-        Let(replacement.withVariable, replacement.binding, e)(e.o)
-      }
     }
   }
 }
@@ -82,17 +48,14 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
       case apply: SubtypeApply[Pre] =>
         implicit val o: Origin = apply.o
 
-        inlineStack.having(apply) {
-          lazy val args = Replacements(
-            for (
-              (arg, v) <- apply.args.prepended(annotated)
-                .zip(apply.ref.decl.args)
-            )
-              yield Replacement(v.get, arg)(v.o)
+        lazy val args = Substitute(Map.from[Expr[Pre], Expr[Pre]](
+          for (
+            (arg, v) <- apply.args.prepended(annotated).zip(apply.ref.decl.args)
           )
+            yield (v.get, arg)
+        ))
 
-          dispatch(args.expr(apply.ref.decl.body.get))
-        }
+        args.dispatch(apply.ref.decl.body.get).rewriteDefault()
       case other => other.rewriteDefault()
     }
 
@@ -330,16 +293,48 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     }
   }
 
+  private def exprSubtypesInvolved(
+      expressions: Seq[Expr[Pre]]
+  ): Seq[Expr[Pre]] = {
+    expressions.filter(expr =>
+      expr.t match {
+        case _: TSubtype[Pre] => true
+        case _ => false
+      }
+    )
+  }
+
   private def subtypeAlgebraEvalAssertStrict(
       implicit o: Origin,
       subtypeVar: Assign[Pre],
   ): Seq[Assert[Post]] = {
-    subExpressions(subtypeVar.value)
-      .map(expr =>
+    if (subtypeVar.target.t.isInstanceOf[PrimitiveType[Pre]]) {
+      subExpressions(subtypeVar.value).map(expr =>
         Assert(
           subtypeAlgebraEval(o, gatherSubtypes(subtypeVar.target.t), expr)
         )(AssertSubtypeFailed(subtypeVar))
       )
+    } else {
+      // TODO collect all subtyped variables involved in the expression to add in the With-condition
+      /*
+      Seq(
+        Assert(subtypeAlgebraEval(
+          o,
+          gatherSubtypes(subtypeVar.target.t),
+          subtypeVar.value,
+        ))(AssertSubtypeFailed(subtypeVar))
+      )
+      subExpressions(subtypeVar.value).map(expr =>
+        Assert(With(
+          Eval(
+            subtypeAlgebraEval(o, gatherSubtypes(subtypeVar.target.t), expr)
+          ),
+          tt,
+        ))(AssertSubtypeFailed(subtypeVar))
+      )
+       */
+      ???
+    }
   }
 
   private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {

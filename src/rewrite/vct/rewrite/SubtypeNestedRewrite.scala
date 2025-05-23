@@ -10,22 +10,18 @@ import vct.col.ast.{
   Expr,
   Implies,
   InstanceSubtype,
-  Let,
   Local,
   Not,
   Or,
   SubtypeApply,
   TSubtype,
   Type,
-  Variable,
 }
 import vct.col.origin.Origin
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
 import vct.col.util.Substitute
-import vct.rewrite.SubtypeNestedRewrite.{Replacement, Replacements}
 
-import scala.annotation.tailrec
 import scala.collection.mutable
 
 case object SubtypeNestedRewrite extends RewriterBuilder {
@@ -34,35 +30,6 @@ case object SubtypeNestedRewrite extends RewriterBuilder {
   override def desc: String =
     "Transform predicate-subtypes defined on top of predicate subtypes into subtype on base type."
 
-  case class Replacement[Pre](replacing: Expr[Pre], binding: Expr[Pre])(
-      implicit o: Origin
-  ) {
-    val withVariable: Variable[Pre] = new Variable(replacing.t)
-
-    def +(other: Replacements[Pre]): Replacements[Pre] =
-      Replacements(Seq(this)) + other
-
-    def +(other: Replacement[Pre]): Replacements[Pre] =
-      Replacements(Seq(this)) + other
-  }
-
-  case class Replacements[Pre](replacements: Seq[Replacement[Pre]]) {
-    def +(other: Replacements[Pre]): Replacements[Pre] =
-      Replacements(replacements ++ other.replacements)
-
-    def +(other: Replacement[Pre]): Replacements[Pre] =
-      Replacements(replacements :+ other)
-
-    def expr(e: Expr[Pre])(implicit o: Origin): Expr[Pre] = {
-      val sub = Substitute[Pre](
-        replacements.map(r => r.replacing -> r.withVariable.get).toMap
-      )
-      val replaced = sub.labelDecls.scope { sub.dispatch(e) }
-      replacements.foldRight(replaced) { case (replacement, e) =>
-        Let(replacement.withVariable, replacement.binding, e)(e.o)
-      }
-    }
-  }
 }
 
 case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
@@ -101,17 +68,14 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
       case apply: SubtypeApply[Pre] =>
         implicit val o: Origin = apply.o
 
-        inlineStack.having(apply) {
-          lazy val args = Replacements(
-            for (
-              (arg, v) <- apply.args.prepended(annotated)
-                .zip(apply.ref.decl.args)
-            )
-              yield Replacement(v.get, arg)(v.o)
+        lazy val args = Substitute(Map.from[Expr[Pre], Expr[Pre]](
+          for (
+            (arg, v) <- apply.args.prepended(annotated).zip(apply.ref.decl.args)
           )
+            yield (v.get, arg)
+        ))
 
-          dispatch(args.expr(apply.ref.decl.body.get))
-        }
+        args.dispatch(apply.ref.decl.body.get).rewriteDefault()
       case other => other.rewriteDefault()
     }
 
