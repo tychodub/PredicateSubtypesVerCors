@@ -91,8 +91,7 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
-            Option((
-              if (
+            Option(if (
                 subtypeExpr match {
                   case BooleanValue(true) => true
                   case _ => false
@@ -104,8 +103,7 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
                   gatherSubtypes(subtypeVar.t),
                   Local(subtypeVar.ref),
                 )
-              }
-            ))
+              })
           ),
         )
       case other => super.dispatch(other)
