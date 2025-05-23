@@ -4,6 +4,7 @@ import hre.util.ScopedStack
 import vct.col.ast.{
   And,
   Apply,
+  BooleanValue,
   Class,
   ClassDeclaration,
   Declaration,
@@ -85,17 +86,26 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
     decl match {
       case subtype: InstanceSubtype[Pre] =>
         val subtypeVar = subtype.args.head
+        val subtypeExpr = gatherSubtypes(subtypeVar.t)
 
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
-            Option(
-              subtype.body.get.rewriteDefault() && subtypeAlgebraEval(
-                o,
-                gatherSubtypes(subtypeVar.t),
-                Local(subtypeVar.ref),
-              )
-            )
+            Option((
+              if (
+                subtypeExpr match {
+                  case BooleanValue(true) => true
+                  case _ => false
+                }
+              ) { subtype.body.get.rewriteDefault() }
+              else {
+                subtype.body.get.rewriteDefault() && subtypeAlgebraEval(
+                  o,
+                  gatherSubtypes(subtypeVar.t),
+                  Local(subtypeVar.ref),
+                )
+              }
+            ))
           ),
         )
       case other => super.dispatch(other)
