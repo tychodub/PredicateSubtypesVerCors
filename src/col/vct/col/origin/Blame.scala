@@ -168,6 +168,16 @@ case class AssignSubtypeFailed(node: Statement[_]) extends AssignFailed {
     s"Failure to prove subtype for assignment `$source`."
 }
 
+case class ExprSubtypeFailed(node: Expr[_]) extends AssignFailed {
+  override def code: String = "exprSubtypeFailed"
+
+  override def descInContext: String =
+    "Failure to prove strict subtype predicates for expression."
+
+  override def inlineDescWithSource(source: String): String =
+    s"Failure to prove strict subtype for expression `$source`."
+}
+
 case class CopyStructFailed(node: Expr[_], field: String)
     extends AssignFailed with NodeVerificationFailure {
   override def code: String = "copyStructFailed"

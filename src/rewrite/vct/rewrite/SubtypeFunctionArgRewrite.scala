@@ -2,11 +2,20 @@ package vct.rewrite
 
 import hre.util.ScopedStack
 import vct.col.ast._
-import vct.col.origin.{AssertFailed, AssignSubtypeFailed, Blame, Origin}
+import vct.col.origin.{
+  AssertFailed,
+  AssignSubtypeFailed,
+  Blame,
+  ExprSubtypeFailed,
+  Origin,
+}
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
 import vct.col.util.Substitute
-import vct.rewrite.SubtypeFunctionArgRewrite.AssertSubtypeFailed
+import vct.rewrite.SubtypeFunctionArgRewrite.{
+  AssertExprSubtypeFailed,
+  AssertSubtypeFailed,
+}
 
 import scala.collection.mutable
 
@@ -23,6 +32,14 @@ case object SubtypeFunctionArgRewrite extends RewriterBuilder {
       assign.o.blame(AssignSubtypeFailed(assign))
     }
   }
+
+  case class AssertExprSubtypeFailed(assign: Expr[_])
+      extends Blame[AssertFailed] {
+
+    override def blame(error: AssertFailed): Unit = {
+      assign.o.blame(ExprSubtypeFailed(assign))
+    }
+  }
 }
 
 case class SubtypeFunctionArgRewrite[Pre <: Generation]()
@@ -34,6 +51,12 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
   private def gatherSubtypes(varType: Type[Pre]): Expr[Pre] =
     varType match {
       case TSubtype(refs, _, _) => refs
+      case _ => tt
+    }
+
+  private def gatherStrictSubtypes(varType: Type[Pre]): Expr[Pre] =
+    varType match {
+      case TSubtype(refs, _, true) => refs
       case _ => tt
     }
 
@@ -78,6 +101,34 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
       case not: Not[Pre] => Not(subtypeAlgebraEval(o, not.arg, subtypeVar))
       case other => other.rewriteDefault()
     }
+  }
+
+  private def subtypeExprAssertions(
+      implicit o: Origin,
+      subtypeExpr: Expr[Pre],
+  ): Expr[Post] = {
+
+    subtypeAlgebraEval(o, subCheck(o, subtypeExpr), subtypeExpr)
+  }
+
+  private def subCheck(
+      implicit o: Origin,
+      arithmeticExpr: Expr[Pre],
+  ): Expr[Pre] = {
+    def subCheckMatch(arithmeticExpr: Expr[Pre]): Seq[Expr[Pre]] = {
+      arithmeticExpr match {
+        case op: NumericBinExpr[Pre] =>
+          subCheckMatch(op.left).appendedAll(subCheckMatch(op.right))
+        case other =>
+          Seq(gatherStrictSubtypes(other.t)).filter(x =>
+            x match { case BooleanValue(true) => false; case _ => true }
+          )
+      }
+    }
+    val expressions = subCheckMatch(arithmeticExpr)
+    if (expressions.isEmpty) { tt: Expr[Pre] }
+    else if (expressions.size == 1) { expressions.head }
+    else { expressions.reduce(Or(_, _)) }
   }
 
   override def dispatch(decl: Declaration[Pre]): Unit = {
@@ -293,48 +344,20 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     }
   }
 
-  private def exprSubtypesInvolved(
-      expressions: Seq[Expr[Pre]]
-  ): Seq[Expr[Pre]] = {
-    expressions.filter(expr =>
-      expr.t match {
-        case _: TSubtype[Pre] => true
-        case _ => false
-      }
-    )
-  }
-
   private def subtypeAlgebraEvalAssertStrict(
       implicit o: Origin,
       subtypeVar: Assign[Pre],
   ): Seq[Assert[Post]] = {
-    if (subtypeVar.target.t.isInstanceOf[PrimitiveType[Pre]]) {
-      subExpressions(subtypeVar.value).map(expr =>
-        Assert(
-          subtypeAlgebraEval(o, gatherSubtypes(subtypeVar.target.t), expr)
-        )(AssertSubtypeFailed(subtypeVar))
-      )
-    } else {
-      // TODO collect all subtyped variables involved in the expression to add in the With-condition
-      /*
-      Seq(
-        Assert(subtypeAlgebraEval(
-          o,
-          gatherSubtypes(subtypeVar.target.t),
-          subtypeVar.value,
-        ))(AssertSubtypeFailed(subtypeVar))
-      )
-      subExpressions(subtypeVar.value).map(expr =>
-        Assert(With(
-          Eval(
-            subtypeAlgebraEval(o, gatherSubtypes(subtypeVar.target.t), expr)
-          ),
-          tt,
-        ))(AssertSubtypeFailed(subtypeVar))
-      )
-       */
-      ???
-    }
+    Seq(
+      Assert(subtypeAlgebraEval(
+        o,
+        gatherSubtypes(subtypeVar.target.t),
+        subtypeVar.value,
+      ))(AssertSubtypeFailed(subtypeVar))
+    ) /* .appendedAll(subtypeExprAssertions(o, subtypeVar.value).map(expr =>
+      Assert(expr)(AssertExprSubtypeFailed(expr))
+    ))
+     */
   }
 
   private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {
@@ -342,17 +365,23 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     stat match {
       case loop: Loop[Pre] => Seq(dispatch(loop))
       case assign: Assign[Pre] =>
-        Seq(dispatch(assign)).appended(subtypeAlgebraEvalAssert(o, assign))
-      case assign =>
-        Seq(dispatch(assign)).appendedAll(
-          assign.collect { case expr: AssignExpression[Pre] => expr.target }
+        Seq(dispatch(assign))
+          .appendedAll(subtypeAlgebraEvalAssertStrict(o, assign))
+      case stat =>
+        Seq(dispatch(stat)).appendedAll(
+          stat.collect { case expr: AssignExpression[Pre] => expr.target }
             .map(target =>
               Assert(subtypeAlgebraEval(o, gatherSubtypes(target.t), target))(
-                AssertSubtypeFailed(assign)
+                AssertSubtypeFailed(stat)
               )
             )
+        ).prependedAll(
+          stat.collect { case expr: Expr[Pre] => expr }.map(expr =>
+            Assert(subtypeExprAssertions(expr.o, expr))(AssertExprSubtypeFailed(
+              expr
+            ))
+          ).filter { case Assert(BooleanValue(true)) => false; case _ => true }
         )
-      case other => Seq(dispatch(other)) // I think this is unreachable
     }
   }
 
