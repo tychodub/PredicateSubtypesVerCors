@@ -326,24 +326,6 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     }
   }
 
-  private def subtypeAlgebraEvalAssert(
-      implicit o: Origin,
-      subtypeVar: Assign[Pre],
-  ): Assert[Post] = {
-    Assert(subtypeAlgebraEval(
-      o,
-      gatherSubtypes(subtypeVar.target.t),
-      subtypeVar.target,
-    ))(AssertSubtypeFailed(subtypeVar))
-  }
-
-  private def subExpressions(expr: Expr[Pre]): Seq[Expr[Pre]] = {
-    expr.flatCollect { case sub: Expr[Pre] =>
-      if (sub != expr) { subExpressions(sub) }
-      else { Seq(expr) }
-    }
-  }
-
   private def subtypeAlgebraEvalAssertStrict(
       implicit o: Origin,
       subtypeVar: Assign[Pre],
@@ -354,10 +336,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
         gatherSubtypes(subtypeVar.target.t),
         subtypeVar.value,
       ))(AssertSubtypeFailed(subtypeVar))
-    ) /* .appendedAll(subtypeExprAssertions(o, subtypeVar.value).map(expr =>
-      Assert(expr)(AssertExprSubtypeFailed(expr))
-    ))
-     */
+    )
   }
 
   private def addAssert(stat: Statement[Pre]): Seq[Statement[Post]] = {
