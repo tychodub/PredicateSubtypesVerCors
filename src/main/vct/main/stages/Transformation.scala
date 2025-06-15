@@ -18,15 +18,42 @@ import vct.rewrite.lang.NoSupportSelfLoop
 import vct.col.rewrite.veymont.StructureCheck
 import vct.importer.{PathAdtImporter, Util}
 import vct.main.Main.TemporarilyUnsupported
-import vct.main.stages.Transformation.{PassEventHandler, TransformationCheckError}
+import vct.main.stages.Transformation.{
+  PassEventHandler,
+  TransformationCheckError,
+}
 import vct.options.Options
 import vct.options.types.{Backend, PathOrStd}
 import vct.resources.Resources
 import vct.result.VerificationError.SystemError
 import vct.rewrite.adt.ImportSetCompat
-import vct.rewrite.{EncodeAutoValue, EncodeRange, EncodeResourceValues, ExplicitResourceValues, HeapVariableToRef, MonomorphizeClass, SmtlibToProverTypes, SubtypeFunctionArgRewrite, SubtypeNestedRewrite}
+import vct.rewrite.{
+  EncodeAutoValue,
+  EncodeRange,
+  EncodeResourceValues,
+  ExplicitResourceValues,
+  HeapVariableToRef,
+  MonomorphizeClass,
+  SmtlibToProverTypes,
+  SubtypeFunctionArgRewrite,
+  SubtypeNestedRewrite,
+  SubtypeStrictCheckNumeric,
+}
 import vct.rewrite.lang.ReplaceSYCLTypes
-import vct.rewrite.veymont.{DeduplicateChorGuards, DropChorExpr, EncodeChannels, EncodeChorBranchUnanimity, EncodeChoreography, EncodeEndpointInequalities, GenerateChoreographyPermissions, GenerateImplementation, InferEndpointContexts, SpecializeEndpointClasses, StratifyExpressions, StratifyUnpointedExpressions}
+import vct.rewrite.veymont.{
+  DeduplicateChorGuards,
+  DropChorExpr,
+  EncodeChannels,
+  EncodeChorBranchUnanimity,
+  EncodeChoreography,
+  EncodeEndpointInequalities,
+  GenerateChoreographyPermissions,
+  GenerateImplementation,
+  InferEndpointContexts,
+  SpecializeEndpointClasses,
+  StratifyExpressions,
+  StratifyUnpointedExpressions,
+}
 
 import java.nio.file.Path
 import java.nio.file.Files
@@ -124,6 +151,7 @@ object Transformation extends LazyLogging {
           splitVerificationByProcedure =
             options.devSplitVerificationByProcedure,
           veymontGeneratePermissions = options.veymontGeneratePermissions,
+          strictArithmeticChecks = options.strictArithmeticChecks,
         )
     }
 
@@ -269,6 +297,7 @@ case class SilverTransformation(
     checkSat: Boolean = true,
     splitVerificationByProcedure: Boolean = false,
     veymontGeneratePermissions: Boolean = false,
+    strictArithmeticChecks: Boolean = false,
 ) extends Transformation(
       onPassEvent,
       Seq(
@@ -293,6 +322,7 @@ case class SilverTransformation(
         EncodeRangedFor,
 
         // transform subtypes to contracts
+        SubtypeStrictCheckNumeric.withArg(strictArithmeticChecks),
         SubtypeNestedRewrite,
         SubtypeFunctionArgRewrite,
 

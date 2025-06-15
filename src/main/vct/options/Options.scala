@@ -126,6 +126,9 @@ case object Options {
         .action((p, c) => c.copy(outputIntermediatePrograms = Some(p))).text(
           "Writes all intermediate ASTs, labeled by pass, to a given folder"
         ),
+      opt[Unit]("strict-arithmetic")
+        .action((_, c) => c.copy(strictArithmeticChecks = true))
+        .text("Turns on mid-expression overflow checking for numerical types"),
       opt[String]("backend-option").unbounded().keyName("<option>,...")
         .action((opt, c) => c.copy(backendFlags = c.backendFlags :+ opt))
         .text("Provide custom flags to Viper"),
@@ -410,6 +413,7 @@ case class Options(
     siliconPrintQuantifierStats: Option[Int] = None,
     bipReportFile: Option[PathOrStd] = None,
     inferHeapContextIntoFrame: Boolean = true,
+    strictArithmeticChecks: Boolean = false,
 
     // Verify options - hidden
     devParserReportAmbiguities: Boolean = false,

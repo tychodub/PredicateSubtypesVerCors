@@ -9,6 +9,7 @@ import vct.col.ast.{
   ClassDeclaration,
   Declaration,
   Expr,
+  GlobalSubtype,
   Implies,
   InstanceSubtype,
   Local,
@@ -91,7 +92,8 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
         classDeclarations.succeed(
           subtype,
           subtype.rewrite(body =
-            Option(if (
+            Option(
+              if (
                 subtypeExpr match {
                   case BooleanValue(true) => true
                   case _ => false
@@ -103,7 +105,32 @@ case class SubtypeNestedRewrite[Pre <: Generation]() extends Rewriter[Pre] {
                   gatherSubtypes(subtypeVar.t),
                   Local(subtypeVar.ref),
                 )
-              })
+              }
+            )
+          ),
+        )
+      case subtype: GlobalSubtype[Pre] =>
+        val subtypeVar = subtype.args.head
+        val subtypeExpr = gatherSubtypes(subtypeVar.t)
+
+        globalDeclarations.succeed(
+          subtype,
+          subtype.rewrite(body =
+            Option(
+              if (
+                subtypeExpr match {
+                  case BooleanValue(true) => true
+                  case _ => false
+                }
+              ) { subtype.body.get.rewriteDefault() }
+              else {
+                subtype.body.get.rewriteDefault() && subtypeAlgebraEval(
+                  o,
+                  gatherSubtypes(subtypeVar.t),
+                  Local(subtypeVar.ref),
+                )
+              }
+            )
           ),
         )
       case other => super.dispatch(other)

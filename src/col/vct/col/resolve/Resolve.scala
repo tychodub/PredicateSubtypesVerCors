@@ -929,16 +929,6 @@ case object ResolveReferences extends LazyLogging {
           Spec.findInstancePredicate(obj, name)
             .getOrElse(throw NoSuchNameError("predicate", name, inv))
         )
-      /* case inv @ JavaTSubtype(refs, supertype) =>
-        refs.foreach(ref =>
-          ref.tryResolve(name =>
-            Spec.findInstanceSubtype(name, ctx).getOrElse(
-              Spec.findGlobalSubtype(name, ctx)
-                .getOrElse(throw NoSuchNameError("subtype", name, inv))
-            )
-          )
-        ) */
-
       case defn: CFunctionDefinition[G] =>
         defn.ref = C.findForwardDeclaration(defn.declarator, ctx)
       case decl: CInit[G] => decl.ref = C.findDefinition(decl.decl, ctx)

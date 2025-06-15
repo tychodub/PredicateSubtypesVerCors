@@ -45,9 +45,6 @@ case object SubtypeFunctionArgRewrite extends RewriterBuilder {
 case class SubtypeFunctionArgRewrite[Pre <: Generation]()
     extends Rewriter[Pre] {
 
-  val inlineStack: ScopedStack[Apply[Pre]] = ScopedStack()
-  val classOwner: mutable.Map[ClassDeclaration[Pre], Class[Pre]] = mutable.Map()
-
   private def gatherSubtypes(varType: Type[Pre]): Expr[Pre] =
     varType match {
       case TSubtype(refs, _, _) => refs
