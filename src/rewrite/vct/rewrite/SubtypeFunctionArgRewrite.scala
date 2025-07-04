@@ -1,14 +1,7 @@
 package vct.rewrite
 
-import hre.util.ScopedStack
 import vct.col.ast._
-import vct.col.origin.{
-  AssertFailed,
-  AssignSubtypeFailed,
-  Blame,
-  ExprSubtypeFailed,
-  Origin,
-}
+import vct.col.origin._
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilder}
 import vct.col.util.AstBuildHelpers._
 import vct.col.util.Substitute
@@ -16,8 +9,6 @@ import vct.rewrite.SubtypeFunctionArgRewrite.{
   AssertExprSubtypeFailed,
   AssertSubtypeFailed,
 }
-
-import scala.collection.mutable
 
 case object SubtypeFunctionArgRewrite extends RewriterBuilder {
   override def key: String = "subtypeFunctionArgRewrite"

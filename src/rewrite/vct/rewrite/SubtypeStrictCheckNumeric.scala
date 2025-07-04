@@ -2,9 +2,7 @@ package vct.rewrite
 
 import vct.col.ast._
 import vct.col.origin.Origin
-import vct.col.ref.{Ref, UnresolvedRef}
-import vct.col.resolve.NoSuchNameError
-import vct.col.resolve.lang.Spec
+import vct.col.ref.Ref
 import vct.col.rewrite.{Generation, Rewriter, RewriterBuilderArg}
 
 case object SubtypeStrictCheckNumeric extends RewriterBuilderArg[Boolean] {
