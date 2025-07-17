@@ -25,6 +25,21 @@ case class AbstractState[G](
     )
   }
 
+  /** Returns a state with the same tracked variables, but with no knowledge of
+    * their values.
+    *
+    * @return
+    *   A copy of this state with all variable values perfectly uncertain
+    */
+  def reset: AbstractState[G] = {
+    AbstractState(
+      valuations.map(v => v._1 -> UncertainValue.uncertain_of(v._1.t)),
+      processes,
+      lock,
+      parameters,
+    )
+  }
+
   /** Updates the state by changing the program counter for a process.
     *
     * @param process
@@ -76,6 +91,22 @@ case class AbstractState[G](
   def unlocked(): AbstractState[G] =
     AbstractState(valuations, processes, None, parameters)
 
+  /** Splits this state such that every variable for which this is possible only
+    * has a single value in any of the resulting states. Variables for which
+    * this is not possible have their uncertain value copied into all substates.
+    *
+    * @return
+    *   A set of states that, in total, represents the same valuations as this
+    *   state, with each resulting state containing only variable valuations
+    *   that are as sharp as possible
+    */
+  def split_values(): Set[AbstractState[G]] = {
+    val valuation_sets: Iterable[Set[(ConcreteVariable[G], UncertainValue)]] =
+      valuations.map(t => t._2.split.getOrElse(Set(t._2)).map(v => t._1 -> v))
+    Utils.cartesian_product(valuation_sets)
+      .map(vs => AbstractState(Map.from(vs), processes, lock, parameters))
+  }
+
   /** Updates the state by adding a path condition to its knowledge of
     * parameters (to avoid infeasible assumptions about potential paths).
     *
@@ -90,7 +121,7 @@ case class AbstractState[G](
     cond match {
       case None => this
       case Some(expr) =>
-        val c =
+        val c: Map[ResolvableVariable[G], UncertainValue] =
           new ConstraintSolver(
             this,
             valuations.keySet
@@ -304,7 +335,8 @@ case class AbstractState[G](
       is_contract: Boolean = false,
   ): UncertainIntegerValue =
     expr match {
-      case CIntegerValue(value) => UncertainIntegerValue.single(value.intValue)
+      case CIntegerValue(value, _) =>
+        UncertainIntegerValue.single(value.intValue)
       case IntegerValue(value) => UncertainIntegerValue.single(value.intValue)
       case SizeOf(tname) =>
         UncertainIntegerValue
@@ -331,26 +363,38 @@ case class AbstractState[G](
       case Mult(left, right) =>
         resolve_integer_expression(left, is_old, is_contract) *
           resolve_integer_expression(right, is_old, is_contract)
+      case AmbiguousDiv(left, right) =>
+        resolve_integer_expression(left, is_old, is_contract) /
+          resolve_integer_expression(right, is_old, is_contract)
+      case AmbiguousTruncDiv(left, right) => // TODO: Handle this?
+        resolve_integer_expression(left, is_old, is_contract) /
+          resolve_integer_expression(right, is_old, is_contract)
       case FloorDiv(left, right) =>
         resolve_integer_expression(left, is_old, is_contract) /
+          resolve_integer_expression(right, is_old, is_contract)
+      case AmbiguousMod(left, right) =>
+        resolve_integer_expression(left, is_old, is_contract) %
+          resolve_integer_expression(right, is_old, is_contract)
+      case AmbiguousTruncMod(left, right) => // TODO: Handle this?
+        resolve_integer_expression(left, is_old, is_contract) %
           resolve_integer_expression(right, is_old, is_contract)
       case Mod(left, right) =>
         resolve_integer_expression(left, is_old, is_contract) %
           resolve_integer_expression(right, is_old, is_contract)
       // Bit operations destroy any knowledge of integer state       TODO: Support bit operations?
-      case BitNot(_) => UncertainIntegerValue.uncertain()
+      case BitNot(_, _, _) => UncertainIntegerValue.uncertain()
       case AmbiguousComputationalOr(_, _) => UncertainIntegerValue.uncertain()
       case AmbiguousComputationalXor(_, _) => UncertainIntegerValue.uncertain()
       case AmbiguousComputationalAnd(_, _) => UncertainIntegerValue.uncertain()
       case ComputationalOr(_, _) => UncertainIntegerValue.uncertain()
       case ComputationalXor(_, _) => UncertainIntegerValue.uncertain()
       case ComputationalAnd(_, _) => UncertainIntegerValue.uncertain()
-      case BitAnd(_, _) => UncertainIntegerValue.uncertain()
-      case BitOr(_, _) => UncertainIntegerValue.uncertain()
-      case BitXor(_, _) => UncertainIntegerValue.uncertain()
-      case BitShl(_, _) => UncertainIntegerValue.uncertain()
-      case BitShr(_, _) => UncertainIntegerValue.uncertain()
-      case BitUShr(_, _) => UncertainIntegerValue.uncertain()
+      case BitAnd(_, _, _, _) => UncertainIntegerValue.uncertain()
+      case BitOr(_, _, _, _) => UncertainIntegerValue.uncertain()
+      case BitXor(_, _, _, _) => UncertainIntegerValue.uncertain()
+      case BitShl(_, _, _, _) => UncertainIntegerValue.uncertain()
+      case BitShr(_, _, _) => UncertainIntegerValue.uncertain()
+      case BitUShr(_, _, _, _) => UncertainIntegerValue.uncertain()
       case Select(cond, ift, iff) =>
         var value: UncertainIntegerValue = UncertainIntegerValue.empty()
         if (resolve_boolean_expression(cond, is_old, is_contract).can_be_true) {
@@ -408,7 +452,7 @@ case class AbstractState[G](
               valuations(v).asInstanceOf[UncertainIntegerValue]
           case None => resolve_collection_expression(obj).len
         }
-      case ProcedureInvocation(ref, args, _, _, _, _) =>
+      case ProcedureInvocation(ref, args, _, _, _, _, _) =>
         get_subroutine_return(
           ref.decl.contract.ensures,
           Map.from(ref.decl.args.zip(args)),
@@ -420,7 +464,7 @@ case class AbstractState[G](
           Map.from(ref.decl.args.zip(args)),
           ref.decl.returnType,
         ).asInstanceOf[UncertainIntegerValue]
-      case FunctionInvocation(ref, args, _, _, _) =>
+      case FunctionInvocation(ref, args, _, _, _, _) =>
         get_subroutine_return(
           ref.decl.contract.ensures,
           Map.from(ref.decl.args.zip(args)),
@@ -467,20 +511,24 @@ case class AbstractState[G](
       case Implies(left, right) =>
         (!resolve_boolean_expression(left, is_old, is_contract)) ||
         resolve_boolean_expression(right, is_old, is_contract)
+      case AmbiguousEq(left, right, _, _) =>
+        handle_equality(left, right, is_old, is_contract, negate = false)
       case Eq(left, right) =>
         handle_equality(left, right, is_old, is_contract, negate = false)
+      case AmbiguousNeq(left, right, _, _) =>
+        handle_equality(left, right, is_old, is_contract, negate = true)
       case Neq(left, right) =>
         handle_equality(left, right, is_old, is_contract, negate = true)
-      case AmbiguousGreater(left, right) =>
+      case AmbiguousGreater(left, right, _) =>
         resolve_integer_expression(left, is_old, is_contract) >
           resolve_integer_expression(right, is_old, is_contract)
-      case AmbiguousLess(left, right) =>
+      case AmbiguousLess(left, right, _) =>
         resolve_integer_expression(left, is_old, is_contract) <
           resolve_integer_expression(right, is_old, is_contract)
-      case AmbiguousGreaterEq(left, right) =>
+      case AmbiguousGreaterEq(left, right, _) =>
         resolve_integer_expression(left, is_old, is_contract) >=
           resolve_integer_expression(right, is_old, is_contract)
-      case AmbiguousLessEq(left, right) =>
+      case AmbiguousLessEq(left, right, _) =>
         resolve_integer_expression(left, is_old, is_contract) <=
           resolve_integer_expression(right, is_old, is_contract)
       case Greater(left, right) =>
@@ -534,7 +582,7 @@ case class AbstractState[G](
               case None => UncertainBooleanValue.uncertain()
             }
         }
-      case ProcedureInvocation(ref, args, _, _, _, _) =>
+      case ProcedureInvocation(ref, args, _, _, _, _, _) =>
         get_subroutine_return(
           ref.decl.contract.ensures,
           Map.from(ref.decl.args.zip(args)),
@@ -546,7 +594,7 @@ case class AbstractState[G](
           Map.from(ref.decl.args.zip(args)),
           ref.decl.returnType,
         ).asInstanceOf[UncertainBooleanValue]
-      case FunctionInvocation(ref, args, _, _, _) =>
+      case FunctionInvocation(ref, args, _, _, _, _) =>
         get_subroutine_return(
           ref.decl.contract.ensures,
           Map.from(ref.decl.args.zip(args)),
@@ -569,31 +617,6 @@ case class AbstractState[G](
           is_old,
           is_contract,
         ) // TODO: Do anything with permission fraction?
-      case PredicateApply(
-            ref,
-            args,
-            _,
-          ) => // TODO: Do anything with permission fraction?
-        if (ref.decl.body.nonEmpty)
-          UncertainBooleanValue
-            .from(
-              true
-            ) // resolve_boolean_expression(Utils.unify_expression(ref.decl.body.get, Map.from(ref.decl.args.zip(args))))
-        else
-          ??? // TODO: Track resource ownership?
-      case InstancePredicateApply(
-            _,
-            ref,
-            args,
-            _,
-          ) => // TODO: Do anything with permission fraction?
-        if (ref.decl.body.nonEmpty)
-          UncertainBooleanValue
-            .from(
-              true
-            ) // resolve_boolean_expression(Utils.unify_expression(ref.decl.body.get, Map.from(ref.decl.args.zip(args))))
-        else
-          ??? // TODO: Track resource ownership?
       case Perm(_, _) =>
         UncertainBooleanValue
           .from(true) // TODO: Do anything with permissions/resources?
@@ -601,6 +624,8 @@ case class AbstractState[G](
         UncertainBooleanValue.from(true) // TODO: How to handle quantifiers?!
       case Result(_) => UncertainBooleanValue.uncertain()
       case AmbiguousResult() => UncertainBooleanValue.uncertain()
+      case SeqMember(_, _) =>
+        UncertainBooleanValue.uncertain() // TODO: Implement something for this?
     }
 
   /** Evaluates a collection expression and returns an uncertain collection
@@ -837,10 +862,15 @@ case class AbstractState[G](
     * @return
     *   An expression that encodes this state
     */
-  def to_expression: Expr[G] = {
+  def to_expression(
+      objs: Option[Map[ConcreteVariable[G], Expr[G]]]
+  ): Expr[G] = {
     val sorted_valuations = valuations.toSeq
       .sortWith((t1, t2) => t1._1.compare(t2._1))
-    sorted_valuations.map(v => v._2.to_expression(v._1.to_expression))
-      .reduce((e1, e2) => And(e1, e2)(e1.o))
+    sorted_valuations.map(v =>
+      v._2.to_expression(
+        v._1.to_expression(Option.when(objs.nonEmpty)(objs.get.apply(v._1)))
+      )
+    ).reduce((e1, e2) => And(e1, e2)(e1.o))
   }
 }

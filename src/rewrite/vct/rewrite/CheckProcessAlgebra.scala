@@ -95,7 +95,7 @@ case class CheckProcessAlgebra[Pre <: Generation]()
 
         val newClass =
           currentModel.having(model) {
-            new Class(
+            new ByReferenceClass(
               Seq(),
               classDeclarations.collect {
                 model.declarations.foreach(dispatch(_))
@@ -139,6 +139,7 @@ case class CheckProcessAlgebra[Pre <: Generation]()
               UnitAccountedPredicate(
                 Star(fieldPerms, rewriteDefault(process.ensures))
               ),
+              tt,
               tt,
               Seq(),
               Seq(),

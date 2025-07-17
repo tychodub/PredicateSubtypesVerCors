@@ -3,9 +3,10 @@ package viper.api.backend
 import com.typesafe.scalalogging.LazyLogging
 import hre.io.RWFile
 import hre.progress.Progress
+import vct.col.ast.Node
 import vct.col.origin.AccountedDirection
 import vct.col.{ast => col, origin => blame}
-import vct.result.VerificationError.SystemError
+import vct.result.VerificationError.{SystemError, TimeOut}
 import viper.api.SilverTreeCompare
 import viper.api.transform.{
   ColToSilver,
@@ -32,6 +33,7 @@ import viper.silver.{ast => silver}
 
 import java.nio.file.{Files, Path}
 import scala.reflect.ClassTag
+import scala.util.matching.Regex
 import scala.util.{Try, Using}
 
 trait SilverBackend
@@ -235,6 +237,9 @@ trait SilverBackend
                       .blame(blame.AssertFailed(getFailure(reason), assert))
                   case _ => defer(reason)
                 }
+              case _: reasons.MagicWandChunkNotFound =>
+                assert.blame
+                  .blame(blame.AssertFailed(getFailure(reason), assert))
               case reasons.AssertionFalse(_) | reasons.NegativePermission(_) =>
                 assert.blame
                   .blame(blame.AssertFailed(getFailure(reason), assert))
@@ -263,10 +268,9 @@ trait SilverBackend
             reason match {
               case reasons.InsufficientPermission(access) =>
                 get[col.Node[_]](access) match {
-                  case col.PredicateApply(_, _, _) =>
+                  case _: col.FoldTarget[_] =>
                     val unfold = get[col.Unfold[_]](node)
-                    unfold.blame
-                      .blame(blame.UnfoldFailed(getFailure(reason), unfold))
+                    unfold.blame.blame(blame.UnfoldFailed(unfold))
                   case _ => defer(reason)
                 }
               case otherReason => defer(otherReason)
@@ -285,19 +289,18 @@ trait SilverBackend
           case PredicateNotWellformed(_, reason, _) => defer(reason)
           case FunctionTerminationError(node: Infoed, reason, _) =>
             val apply = get[col.Invocation[_]](node)
-            apply.ref.decl.blame.blame(blame.TerminationMeasureFailed(
-              apply.ref.decl,
-              apply,
-              getDecreasesClause(reason),
-            ))
+            apply.ref.decl.blame.blame(getDecreasesBlame(apply, reason))
           case MethodTerminationError(node: Infoed, reason, _) =>
-            val apply = get[col.Invocation[_]](node)
-            apply.ref.decl.blame.blame(blame.TerminationMeasureFailed(
-              apply.ref.decl,
-              apply,
-              getDecreasesClause(reason),
-            ))
-          case LoopTerminationError(node: Infoed, reason, _) =>
+            node match {
+              case silver.While(_, _, _) =>
+                val loop = get[col.Loop[_]](node)
+                loop.contract.asInstanceOf[col.LoopInvariant[_]].blame
+                  .blame(getDecreasesWhileBlame(loop, reason))
+              case _ =>
+                val apply = get[col.InvokingNode[_]](node)
+                apply.ref.decl.blame.blame(getDecreasesBlame(apply, reason))
+            }
+          case err @ LoopTerminationError(node: Infoed, reason, _) =>
             val decreases = get[col.DecreasesClause[_]](node)
             info(node).invariant.get.blame
               .blame(blame.LoopTerminationMeasureFailed(decreases))
@@ -313,8 +316,7 @@ trait SilverBackend
                   .blame(blame.PackageFailed(getFailure(reason), packageNode))
               case reasons.InsufficientPermission(permNode) =>
                 get[col.Node[_]](permNode) match {
-                  case col.Perm(_, _) | col.PredicateApply(_, _, _) | col
-                        .Value(_) =>
+                  case col.Perm(_, _) | col.Value(_) =>
                     packageNode.blame.blame(
                       blame.PackageFailed(getFailure(reason), packageNode)
                     )
@@ -331,8 +333,7 @@ trait SilverBackend
                 ) // take the blame
               case reasons.InsufficientPermission(permNode) =>
                 get[col.Node[_]](permNode) match {
-                  case col.Perm(_, _) | col.PredicateApply(_, _, _) | col
-                        .Value(_) =>
+                  case col.Perm(_, _) | col.Value(_) =>
                     applyNode.blame.blame(
                       blame.WandApplyFailed(getFailure(reason), applyNode)
                     ) // take the blame
@@ -373,6 +374,8 @@ trait SilverBackend
       case AbortedExceptionally(throwable) =>
         throwable.printStackTrace()
         throw ViperCrashed(s"Viper has crashed: $throwable")
+      case TimeoutOccurred(t, text) =>
+        throw TimeOut(s"Time out occurred after $t seconds")
       case other =>
         throw NotSupported(
           s"Viper returned an error that VerCors does not recognize: $other"
@@ -392,8 +395,32 @@ trait SilverBackend
           .NegativePermissionValue(
             info(p).permissionValuePermissionNode.get
           ) // need to fetch access
-      case _ => ???
+      case r => throw new NotImplementedError("Missing: " + r)
     }
+
+  def getDecreasesWhileBlame(
+      loop: col.Loop[_],
+      reason: ErrorReason,
+  ): blame.LoopInvariantFailure = {
+    blame.DecreaseTerminationMeasureFailedDueToWhile(loop)
+  }
+
+  def getDecreasesBlame(
+      invoking: col.InvokingNode[_],
+      reason: ErrorReason,
+  ): blame.TerminationMeasureFailed = {
+    reason match {
+      case TerminationConditionFalse(node: Infoed) =>
+        val procedure = get[col.ContractApplicable[_]](node)
+        blame.CallTerminationMeasureFailed(invoking, procedure)
+      case _ =>
+        blame.DecreaseTerminationMeasureFailed(
+          invoking.ref.decl,
+          invoking,
+          getDecreasesClause(reason),
+        )
+    }
+  }
 
   def getDecreasesClause(reason: ErrorReason): col.DecreasesClause[_] =
     reason match {
@@ -429,7 +456,7 @@ trait SilverBackend
         deref.blame.blame(blame.InsufficientPermission(deref))
       case reasons.InsufficientPermission(p @ silver.PredicateAccess(_, _)) =>
         val unfolding = info(p).unfolding.get
-        unfolding.blame.blame(blame.UnfoldFailed(getFailure(reason), unfolding))
+        unfolding.blame.blame(blame.UnfoldFailed(unfolding))
       case reasons.QPAssertionNotInjective(access: silver.ResourceAccess) =>
         val starall = info(access).starall.get
         starall.blame.blame(blame.ReceiverNotInjective(starall, get(access)))
@@ -445,7 +472,9 @@ trait SilverBackend
       case reasons.MapKeyNotContained(_, key) =>
         val get = info(key).mapGet.get
         get.blame.blame(blame.MapKeyError(get))
-
+      case reasons.AssertionFalse(expr) =>
+        val asserting = info(expr).asserting.get
+        asserting.blame.blame(blame.AssertFailed(getFailure(reason), asserting))
       case other =>
         throw NotSupported(
           s"Viper returned an error reason that VerCors does not recognize: $other"

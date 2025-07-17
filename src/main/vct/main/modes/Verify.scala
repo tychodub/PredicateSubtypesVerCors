@@ -4,6 +4,7 @@ import com.typesafe.scalalogging.LazyLogging
 import vct.options.Options
 import hre.io.{CollectString, Readable}
 import hre.util.Time
+import hre.util.Time.logTime
 import sun.misc.{Signal, SignalHandler}
 import vct.col.origin.{BlameCollector, TableEntry, VerificationFailure}
 import vct.col.rewrite.bip.BIP
@@ -12,6 +13,7 @@ import vct.main.Main.{
   EXIT_CODE_ERROR,
   EXIT_CODE_SUCCESS,
   EXIT_CODE_VERIFICATION_FAILURE,
+  EXIT_CODE_TIMEOUT,
 }
 import vct.main.stages.Stages
 import vct.options.types.PathOrStd
@@ -93,10 +95,12 @@ case object Verify extends LazyLogging {
       case _: IllegalArgumentException =>
     }
 
-    val start = java.time.Instant.now()
-
-    try {
+    logTime(
+      "VerCors",
       verifyWithOptions(options, options.inputs) match {
+        case Left(err: VerificationError.TimeOut) =>
+          logger.error(err.text)
+          return EXIT_CODE_TIMEOUT
         case Left(err: VerificationError.UserError) =>
           logger.error(err.text)
           EXIT_CODE_ERROR
@@ -117,13 +121,8 @@ case object Verify extends LazyLogging {
           }
           friendlyHandleBipReport(report, options.bipReportFile)
           EXIT_CODE_VERIFICATION_FAILURE
-      }
-    } finally {
-      logger.info(
-        s"Finished verification at ${Time.formatTime()} (duration: ${Time
-            .formatDuration(Duration.between(start, java.time.Instant.now()))})"
-      )
-    }
+      },
+    )
   }
 
   def friendlyHandleBipReport(

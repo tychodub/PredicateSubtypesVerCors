@@ -77,11 +77,12 @@ case object Spec {
   }
 
   def builtinField[G](
-      obj: Expr[G],
+      objT: Type[G],
       field: String,
       blame: Blame[BuiltinError],
+      origin: Origin
   ): Option[BuiltinField[G]] = {
-    implicit val o: Origin = obj.o
+    implicit val o: Origin = origin
 
     @tailrec
     def matchBuiltin(t: Type[G], field: String): Option[Expr[G] => Expr[G]] = {
@@ -89,7 +90,7 @@ case object Spec {
         case (TSubtype(_, supertype, _), field) =>
           matchBuiltin(supertype, field)
 
-        case (TArray(_), "length") => Some(Length(_)(blame))
+        case (TArray(_), "length") => Length(_)(blame)
 
         case (_: SizedType[G], "isEmpty") => Some(Empty(_))
         case (_: SizedType[G], "size") => Some(Size(_))
@@ -115,7 +116,7 @@ case object Spec {
         case _ => None
       }
     }
-    matchBuiltin(obj.t, field).map(BuiltinField(_))
+    matchBuiltin(objT, field).map(BuiltinField(_))
   }
 
   def argCount[G](
@@ -383,8 +384,8 @@ case object Spec {
 
   def findMethod[G](obj: Expr[G], name: String): Option[InstanceMethod[G]] =
     obj.t match {
-      case TClass(Ref(cls), _) =>
-        cls.decls.flatMap(Referrable.from).collectFirst {
+      case cls: TClass[G] =>
+        cls.cls.decl.decls.flatMap(Referrable.from).collectFirst {
           case ref @ RefInstanceMethod(decl) if ref.name == name => decl
         }
       case _ => None
@@ -395,8 +396,8 @@ case object Spec {
       name: String,
   ): Option[InstanceFunction[G]] =
     obj.t match {
-      case TClass(Ref(cls), _) =>
-        cls.decls.flatMap(Referrable.from).collectFirst {
+      case cls: TClass[G] =>
+        cls.cls.decl.decls.flatMap(Referrable.from).collectFirst {
           case ref @ RefInstanceFunction(decl) if ref.name == name => decl
         }
       case _ => None
@@ -407,8 +408,8 @@ case object Spec {
       name: String,
   ): Option[InstancePredicate[G]] =
     obj.t match {
-      case TClass(Ref(cls), _) =>
-        cls.decls.flatMap(Referrable.from).collectFirst {
+      case cls: TClass[G] =>
+        cls.cls.decl.decls.flatMap(Referrable.from).collectFirst {
           case ref @ RefInstancePredicate(decl) if ref.name == name => decl
         }
       case JavaTClass(Ref(cls), _) =>
@@ -429,8 +430,8 @@ case object Spec {
 
   def findField[G](obj: Expr[G], name: String): Option[InstanceField[G]] =
     obj.t match {
-      case TClass(Ref(cls), _) =>
-        cls.decls.flatMap(Referrable.from).collectFirst {
+      case cls: TClass[G] =>
+        cls.cls.decl.decls.flatMap(Referrable.from).collectFirst {
           case ref @ RefField(decl) if ref.name == name => decl
         }
       case _ => None

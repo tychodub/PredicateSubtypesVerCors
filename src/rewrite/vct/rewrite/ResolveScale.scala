@@ -80,10 +80,6 @@ case class ResolveScale[Pre <: Generation]() extends Rewriter[Pre] {
       case Perm(loc, p) => Perm(dispatch(loc), amount * dispatch(p))
       case Value(loc) => (amount > NoPerm()) ==> Value(dispatch(loc))
       case AutoValue(loc) => (amount > NoPerm()) ==> AutoValue(dispatch(loc))
-      case apply: PredicateApply[Pre] =>
-        apply.rewrite(perm = amount * dispatch(apply.perm))
-      case apply: InstancePredicateApply[Pre] =>
-        apply.rewrite(perm = amount * dispatch(apply.perm))
 
       case Star(left, right) => scale(left, amount) &* scale(right, amount)
       case Implies(cond, cons) => Implies(dispatch(cond), scale(cons, amount))
@@ -98,6 +94,18 @@ case class ResolveScale[Pre <: Generation]() extends Rewriter[Pre] {
       case l: Let[Pre] => l.rewrite(main = scale(l.main, amount))
       case InlinePattern(inner, parent, group) =>
         InlinePattern(scale(inner, amount), parent, group)
+      case a @ Asserting(condition, body) =>
+        a.rewrite(
+          condition = scale(condition, amount),
+          body = scale(body, amount),
+        )
+      case a @ Assuming(assn, inner) =>
+        a.rewrite(assn = scale(assn, amount), inner = scale(inner, amount))
+      case pd @ PolarityDependent(onInhale, onExhale) =>
+        pd.rewrite(
+          onInhale = scale(onInhale, amount),
+          onExhale = scale(onExhale, amount),
+        )
       case other => throw WrongScale(other)
     }
   }

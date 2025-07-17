@@ -15,7 +15,7 @@ class FeatureRainbow[G] {
   private var returnValues: Seq[Expr[G]] = Nil
 
   def scan(node: Node[G]): Unit =
-    node.transSubnodes.foreach(node =>
+    node.foreach(node =>
       scanFlatly(node).foreach(f => {
         features += f
         examples.getOrElseUpdate(f, ArrayBuffer()) += node
@@ -32,7 +32,8 @@ class FeatureRainbow[G] {
 
       case node: ArrayLocation[G] => Arrays
       case node: NewArray[G] => Arrays
-      case node: NewPointerArray[G] => Arrays
+      case node: NewPointer[G] => Arrays
+      case node: NewConstPointer[G] => return Seq(Arrays, AxiomaticLibraryType)
       case node: ArraySubscript[G] => Arrays
       case node: Length[G] => Arrays
       case node: TArray[G] => Arrays
@@ -79,6 +80,8 @@ class FeatureRainbow[G] {
       case node: OptNoneTyped[G] => AxiomaticLibraryType
       case node: OptSomeTyped[G] => AxiomaticLibraryType
       case node: TNull[G] => AxiomaticLibraryType
+      case node: TVector[G] => AxiomaticLibraryType
+      case node: TConstPointer[G] => AxiomaticLibraryType
 
       case node: Assert[G] => BasicStatement
       case node: Assume[G] => BasicStatement
@@ -99,7 +102,6 @@ class FeatureRainbow[G] {
       case node: InstancePredicateApply[G] => Classes
       case node: CoalesceInstancePredicateApply[G] => Classes
       case node: InstanceFunctionInvocation[G] => Classes
-      case node: InstancePredicateLocation[G] => Classes
       case node: NewObject[G] => Classes
       case node: TClass[G] => Classes
       case node: Class[G] => Classes
@@ -184,6 +186,7 @@ class FeatureRainbow[G] {
       case node: CLocalDeclaration[G] => CSpecific
       case node: CLong[G] => CSpecific
       case node: CName[G] => CSpecific
+      case node: COpaque[G] => CSpecific
       case node: CParam[G] => CSpecific
       case node: CPrimitiveType[G] => CSpecific
       case node: CPure[G] => CSpecific
@@ -506,7 +509,6 @@ class FeatureRainbow[G] {
       case node: TBag[G] => SilverAxiomaticLibraryType
       case node: TSeq[G] => SilverAxiomaticLibraryType
       case node: TSet[G] => SilverAxiomaticLibraryType
-      case node: TVector[G] => SilverAxiomaticLibraryType
 
       case node: SilverCurFieldPerm[G] => SilverSpecific
       case node: SilverCurPredPerm[G] => SilverSpecific

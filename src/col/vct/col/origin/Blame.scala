@@ -178,27 +178,43 @@ case class ExprSubtypeFailed(node: Expr[_]) extends AssignFailed {
     s"Failure to prove strict subtype for expression `$source`."
 }
 
-case class CopyStructFailed(node: Expr[_], field: String)
-    extends AssignFailed with NodeVerificationFailure {
-  override def code: String = "copyStructFailed"
+case class CopyClassFailed(node: Node[_], clazz: ByValueClass[_], field: String)
+    extends PointerDerefError
+    with InvocationFailure
+    with NodeVerificationFailure {
+  override def code: String = "copyClassFailed"
   override def descInContext: String =
-    s"Insufficient read permission for field '$field' to copy struct."
+    s"Insufficient read permission for field '$field' to copy ${clazz.o
+        .find[TypeName].map(_.name).getOrElse("class")}."
   override def inlineDescWithSource(source: String): String =
     s"Insufficient permission for assignment `$source`."
 }
 
-case class CopyStructFailedBeforeCall(node: Expr[_], field: String)
-    extends AssignFailed
-    with FrontendInvocationError
+case class CopyClassFailedBeforeCall(
+    node: Node[_],
+    clazz: ByValueClass[_],
+    field: String,
+) extends PointerDerefError
+    with InvocationFailure
     with NodeVerificationFailure {
-  override def code: String = "copyStructFailedBeforeCall"
+  override def code: String = "copyClassFailedBeforeCall"
   override def descInContext: String =
-    s"Insufficient read permission for field '$field' to copy struct before call."
+    s"Insufficient read permission for field '$field' to copy ${clazz.o
+        .find[TypeName].map(_.name).getOrElse("class")} before call."
   override def inlineDescWithSource(source: String): String =
     s"Insufficient permission for call `$source`."
 }
 
-case class AssertFailed(failure: ContractFailure, node: Assert[_])
+case class TypeSizeMayBeZero(node: CCast[_])
+    extends FrontendInvocationError with NodeVerificationFailure {
+  override def code: String = "typeSizeZero"
+  override def descInContext: String =
+    s"The size of '${node.castType}' may be zero"
+  override def inlineDescWithSource(source: String): String =
+    s"The size of '${node.castType}' may be zero for cast `$source`"
+}
+
+case class AssertFailed(failure: ContractFailure, node: Node[_])
     extends WithContractFailure {
   override def baseCode: String = "assertFailed"
   override def descInContext: String = "Assertion may not hold, since"
@@ -219,12 +235,20 @@ case class ExhaleFailed(failure: ContractFailure, node: Exhale[_])
   override def inlineDescWithSource(node: String, failure: String): String =
     s"`$node` may fail, since $failure."
 }
-case class UnfoldFailed(failure: ContractFailure, node: Node[_])
-    extends WithContractFailure {
+sealed trait UnfoldFailure extends VerificationFailure
+case class UnfoldFailed(node: Node[_])
+    extends UnfoldFailure with NodeVerificationFailure {
+  override def code: String = "unfoldFailed"
+  override def descInContext: String = "Unfold may fail"
+  override def inlineDescWithSource(source: String): String =
+    s"`$source` may fail"
+}
+case class UnfoldInlineFailed(failure: ContractFailure, node: Node[_])
+    extends UnfoldFailure with WithContractFailure {
   override def baseCode: String = "unfoldFailed"
-  override def descInContext: String = "Unfold may fail, since"
+  override def descInContext: String = "Unfold may fail"
   override def inlineDescWithSource(node: String, failure: String): String =
-    s"`$node` may fail, since $failure."
+    s"`$node` may fail, because it is inline and $failure"
 }
 case class FoldFailed(failure: ContractFailure, node: Fold[_])
     extends WithContractFailure {
@@ -316,6 +340,28 @@ case class ContextEverywhereFailedInPre(
   override def inlineDescWithSource(node: String, failure: String): String =
     s"Context of `$node` may not hold in the precondition, since $failure."
 }
+
+case class MismatchedArrayDimension(
+    node: InvokingNode[_],
+    dimension: Expr[_],
+    v: Variable[_],
+) extends InvocationFailure {
+  override def code: String = "arrayDimension"
+
+  override def position: String = node.o.shortPositionText
+
+  override def desc: String =
+    Message.messagesInContext(
+      node.o -> "Call to applicable may fail, because ...",
+      dimension.o ->
+        s"... this dimension might not match expected type ${v.t}$errUrl",
+    )
+
+  override def inlineDesc: String =
+    s"Call ${node.o.inlineContextText} might fail because `${dimension.o
+        .inlineContextText}` may not match type ${v.t}"
+}
+
 case class SYCLItemMethodPreconditionFailed(node: InvokingNode[_])
     extends NodeVerificationFailure with FrontendInvocationError {
   override def code: String = "syclItemMethodPreFailed"
@@ -328,22 +374,26 @@ case class SYCLItemMethodPreconditionFailed(node: InvokingNode[_])
 
 sealed trait CallableFailure
     extends ConstructorFailure with JavaConstructorFailure
-sealed trait ContractedFailure extends CallableFailure
+sealed trait ContractedFailure
+    extends CallableFailure with ChoreographyFailure with ChorRunFailure
 case class PostconditionFailed(
     path: Seq[AccountedDirection],
     failure: ContractFailure,
     node: ContractApplicable[_],
-) extends ContractedFailure with SeqCallableFailure with WithContractFailure {
+) extends ContractedFailure with WithContractFailure {
   override def baseCode: String = "postFailed"
   override def descInContext: String = "Postcondition may not hold, since"
   override def inlineDescWithSource(node: String, failure: String): String =
     s"Postcondition of `$node` may not hold, since $failure."
 }
-case class TerminationMeasureFailed(
+
+sealed trait TerminationMeasureFailed extends ContractedFailure
+
+case class DecreaseTerminationMeasureFailed(
     applicable: ContractApplicable[_],
-    apply: Invocation[_],
+    apply: InvokingNode[_],
     measure: DecreasesClause[_],
-) extends ContractedFailure with SeqCallableFailure with VerificationFailure {
+) extends TerminationMeasureFailed {
   override def code: String = "decreasesFailed"
   override def position: String = measure.o.shortPositionText
   override def desc: String =
@@ -355,11 +405,47 @@ case class TerminationMeasureFailed(
   override def inlineDesc: String =
     s"${apply.o.inlineContextText} may not terminate, since `${measure.o.inlineContextText}` is not decreased or not bounded"
 }
+
+case class DecreaseTerminationMeasureFailedDueToWhile(node: Loop[_])
+    extends LoopInvariantFailure with NodeVerificationFailure {
+  override def code: String = "loopTerminationFailed"
+  override def position: String = node.o.shortPositionText
+  override def descInContext: String =
+    "Loop may not terminate, since no decrease clause is given"
+  override def inlineDescWithSource(source: String): String =
+    s"Loop may not terminate, since ${node.o.inlineContextText} is not proven to be decreasing with a decrease clause"
+}
+
+case class CallTerminationMeasureFailed(
+    apply: InvokingNode[_],
+    calledMethod: ContractApplicable[_],
+) extends TerminationMeasureFailed {
+  override def code: String = "callDecreasesFailed"
+  override def position: String = calledMethod.o.shortPositionText
+  override def desc: String =
+    Message.messagesInContext(
+      apply.o -> "The invocation does not terminate, since ...",
+      calledMethod.o -> "... this called method may not decrease.",
+    )
+  override def inlineDesc: String =
+    s"The invocation ${apply.o.inlineContextText} may not terminate, since `${calledMethod.o.inlineContextText}` is not decreasing"
+}
+
 case class ContextEverywhereFailedInPost(
     failure: ContractFailure,
     node: ContractApplicable[_],
-) extends ContractedFailure with SeqCallableFailure with WithContractFailure {
+) extends ContractedFailure with WithContractFailure {
   override def baseCode: String = "contextPostFailed"
+  override def descInContext: String =
+    "Context may not hold in postcondition, since"
+  override def inlineDescWithSource(node: String, failure: String): String =
+    s"Context of `$node` may not hold in the postcondition, since $failure."
+}
+case class ContextEverywhereFailedInRunPost(
+    failure: ContractFailure,
+    node: RunMethod[_],
+) extends ContractedFailure with WithContractFailure {
+  override def baseCode: String = "contextRunPostFailed"
   override def descInContext: String =
     "Context may not hold in postcondition, since"
   override def inlineDescWithSource(node: String, failure: String): String =
@@ -368,7 +454,7 @@ case class ContextEverywhereFailedInPost(
 case class AutoValueLeakCheckFailed(
     failure: ContractFailure,
     node: ContractApplicable[_],
-) extends ContractedFailure with SeqCallableFailure with WithContractFailure {
+) extends ContractedFailure with WithContractFailure {
   override def baseCode: String = "autoValueLeak"
   override def descInContext: String = "The AutoValue leak check failed, since"
   override def inlineDescWithSource(node: String, failure: String): String =
@@ -388,26 +474,6 @@ case class ExceptionNotInSignals(node: AbstractMethod[_])
     "Method may throw exception not included in signals clauses."
   override def inlineDescWithSource(source: String): String =
     s"Method `$source` may throw exception not included in signals clauses."
-}
-case class SeqRunPreconditionFailed(
-    path: Seq[AccountedDirection],
-    failure: ContractFailure,
-    node: ChorRun[_],
-) extends SeqRunFailure with WithContractFailure {
-  override def baseCode: String = "seqRunPreFailed"
-  override def descInContext: String = "Precondition may not hold, since"
-  override def inlineDescWithSource(node: String, failure: String): String =
-    s"Precondition of `$node` may not hold, since $failure."
-}
-case class SeqRunContextEverywhereFailedInPre(
-    failure: ContractFailure,
-    node: ChorRun[_],
-) extends SeqRunFailure with WithContractFailure {
-  override def baseCode: String = "seqRunContextPreFailed"
-  override def descInContext: String =
-    "Context may not hold in precondition, since"
-  override def inlineDescWithSource(node: String, failure: String): String =
-    s"Context of `$node` may not hold in the precondition, since $failure."
 }
 case class SYCLKernelLambdaFailure(kernelFailure: KernelFailure)
     extends VerificationFailure {
@@ -502,37 +568,36 @@ case class PlusProviderInvocationFailed(innerFailure: WithContractFailure)
     innerFailure.inlineDescWithSource(node, failure)
 }
 
-sealed trait SeqCallableFailure extends VerificationFailure
-sealed trait SeqRunFailure extends SeqCallableFailure
+sealed trait ChoreographyFailure extends VerificationFailure
+sealed trait ChorRunFailure extends VerificationFailure
 
-sealed trait EndpointFailure extends VerificationFailure
-case class EndpointPreconditionFailed(
-    path: Seq[AccountedDirection],
+// Duplicated because InvokingNode in PreconditionFailed did not allow the choreography
+case class ChorRunPreconditionFailed(
+    path: Option[Seq[AccountedDirection]],
     failure: ContractFailure,
-    node: Endpoint[_],
-) extends EndpointFailure with WithContractFailure {
-  override def baseCode: String = "endpointPreFailed"
-  override def descInContext: String =
-    "Precondition of constructor of this endpoint may not hold, since"
+    node: ChorRun[_],
+) extends ChorRunFailure with WithContractFailure {
+  override def baseCode: String = "chorRunPreFailed"
+  override def descInContext: String = "Precondition may not hold, since"
   override def inlineDescWithSource(node: String, failure: String): String =
     s"Precondition of `$node` may not hold, since $failure."
 }
-case class EndpointContextEverywhereFailedInPre(
+// Duplicated because InvokingNode in ContextEverywhereFailedInPre did not allow the choreography
+case class ChorRunContextEverywhereFailedInPre(
     failure: ContractFailure,
-    node: Endpoint[_],
-) extends EndpointFailure with WithContractFailure {
-  override def baseCode: String = "endpointContextPreFailed"
+    node: ChorRun[_],
+) extends ChorRunFailure with WithContractFailure {
+  override def baseCode: String = "chorRunContextPreFailed"
   override def descInContext: String =
-    "Context may not hold in precondition of endpoint constructor, since"
+    "Context may not hold in precondition, since"
   override def inlineDescWithSource(node: String, failure: String): String =
     s"Context of `$node` may not hold in the precondition, since $failure."
 }
 
 sealed trait FrontendIfFailure extends VerificationFailure
-sealed trait SeqBranchFailure extends FrontendIfFailure
 
 case class BranchUnanimityFailed(guard1: Node[_], guard2: Node[_])
-    extends SeqBranchFailure {
+    extends FrontendIfFailure with ChorStatementFailure {
   override def code: String = "branchNotUnanimous"
 
   override def desc: String =
@@ -550,10 +615,9 @@ case class BranchUnanimityFailed(guard1: Node[_], guard2: Node[_])
 }
 
 sealed trait FrontEndLoopFailure extends VerificationFailure
-sealed trait SeqLoopFailure extends FrontEndLoopFailure
 
 case class LoopUnanimityNotEstablished(guard1: Node[_], guard2: Node[_])
-    extends SeqLoopFailure {
+    extends FrontEndLoopFailure with ChorStatementFailure {
   override def code: String = "loopUnanimityNotEstablished"
 
   override def desc: String =
@@ -571,7 +635,7 @@ case class LoopUnanimityNotEstablished(guard1: Node[_], guard2: Node[_])
 }
 
 case class LoopUnanimityNotMaintained(guard1: Node[_], guard2: Node[_])
-    extends SeqLoopFailure {
+    extends FrontEndLoopFailure with ChorStatementFailure {
   override def code: String = "loopUnanimityNotMaintained"
 
   override def desc: String =
@@ -610,6 +674,17 @@ case class ParticipantsNotDistinct(node: Communicate[_])
     "The participants in this communicate statement might not be distinct."
   override def inlineDescWithSource(source: String): String =
     s"The participants of `$source` might not be distinct."
+}
+
+case class ChannelInvariantNotEstablished(
+    failure: ContractFailure,
+    node: Communicate[_],
+) extends CommunicateFailure with WithContractFailure {
+  override def baseCode: String = "channelInvariantNotEstablished"
+  override def descInContext: String =
+    "This channel invariant cannot be estalished, since"
+  override def inlineDescWithSource(node: String, failure: String): String =
+    s"The channel invariant at `$node` cannot be established, since $failure"
 }
 
 sealed trait DerefInsufficientPermission extends FrontendDerefError
@@ -764,6 +839,17 @@ case class KernelPredicateNotInjective(
 
   override def inlineDesc: String =
     s"${predicate.o.inlineContextText} does not have a unique location for every thread, and it could not be simplified away."
+}
+
+case class KernelInvariantNotEstablished(
+    failure: ContractFailure,
+    node: ParInvariant[_],
+) extends KernelFailure with WithContractFailure {
+  override def baseCode: String = "notEstablished"
+  override def descInContext: String =
+    "This kernel invariant may not be establised, since"
+  override def inlineDescWithSource(node: String, failure: String): String =
+    s"`$node` may not be established, since $failure."
 }
 
 sealed trait KernelBarrierFailure extends VerificationFailure
@@ -1016,6 +1102,16 @@ case class ArrayValuesPerm(node: Values[_]) extends ArrayValuesError {
     "there may be insufficient permission to access the array at the specified range"
 }
 
+// TODO: Signed-ness
+case class IntegerOutOfBounds(node: Node[_], bits: Int)
+    extends NodeVerificationFailure {
+  override def code: String = "intBounds"
+  override def descInContext: String =
+    s"Integer may be out of bounds, expected a `$bits`-bit integer"
+  override def inlineDescWithSource(source: String) =
+    s"Integer `$source` may be out of bounds, expected a `$bits`-bit integer"
+}
+
 sealed trait PointerSubscriptError extends FrontendSubscriptError
 sealed trait PointerDerefError
     extends PointerSubscriptError with FrontendDerefError
@@ -1187,6 +1283,16 @@ case class CoerceZFracFracFailed(node: Expr[_]) extends UnsafeCoercion {
   override def inlineDescWithSource(source: String): String =
     s"`$source` may be zero."
 }
+case class NonNullCoercionError(node: Node[_])
+    extends UnsafeCoercion with NodeVerificationFailure {
+  override def code: String = "arrayPtrNull"
+
+  override def descInContext: String =
+    "Pointer may be null and an array typed variable may not be null."
+
+  override def inlineDescWithSource(source: String): String =
+    s"Pointer in `$source` may be null, but arrays may not be null."
+}
 
 sealed trait JavaAnnotationFailure extends VerificationFailure
 sealed trait JavaConstructorFailure extends VerificationFailure
@@ -1329,6 +1435,17 @@ case class TransitionPreconditionFailed(
     s"Precondition of $node does not hold, in a particular synchronization, since $failure"
 }
 
+case class UnreachableReachedError(node: Node[_])
+    extends NodeVerificationFailure {
+  override def code: String = "unreachable"
+
+  override def descInContext: String =
+    "Location marked as unreachable was reached"
+
+  override def inlineDescWithSource(source: String): String =
+    s"Location `$source` was reached but was marked unreachable"
+}
+
 trait Blame[-T <: VerificationFailure] {
   def blame(error: T): Unit
 }
@@ -1441,6 +1558,8 @@ object NeverNone
     extends PanicBlame(
       "get in `opt == none ? _ : get(opt)` should always be ok."
     )
+object NoZeroDiv
+    extends PanicBlame("denominator of division is guaranteed not to be zero.")
 object FramedSeqIndex
     extends PanicBlame(
       "access in `∀i. 0 <= i < |xs| ==> ...xs[i]...` should never be out of bounds"
@@ -1508,10 +1627,6 @@ object DerefAssignTarget
     extends PanicBlame(
       "Assigning to a field should trigger an error on the assignment, and not on the dereference."
     )
-object SubscriptAssignTarget
-    extends PanicBlame(
-      "Assigning to a subscript should trigger an error on the assignment, and not on the subscript."
-    )
 object DerefPerm
     extends PanicBlame(
       "Dereferencing a field in a permission should trigger an error on the permission, not on the dereference."
@@ -1534,9 +1649,20 @@ object JavaArrayInitializerBlame
       "The explicit initialization of an array in Java should never generate an assignment that exceeds the bounds of the array"
     )
 
+object NonNullPointerNull
+    extends PanicBlame("A non-null pointer can never be null")
+
+object LLVMSretPerm
+    extends PanicBlame(
+      "Contracts always contain write-permission for function-arguments with an LLVM sret-attribute."
+    )
+
 object UnsafeDontCare {
   case class Satisfiability(reason: String)
       extends UnsafeDontCare[NontrivialUnsatisfiable]
+  case class Contract(reason: String) extends UnsafeDontCare[ContractedFailure]
+  case class Invocation(reason: String)
+      extends UnsafeDontCare[InvocationFailure]
 }
 
 trait UnsafeDontCare[T <: VerificationFailure]

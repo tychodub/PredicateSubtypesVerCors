@@ -13,6 +13,59 @@ case object CoercionUtils {
   def getCoercion[G](source: Type[G], target: Type[G]): Option[Coercion[G]] =
     getAnyCoercion(source, target).filter(_.isCPromoting)
 
+  // We don't want pointers to coerce just between anything, just some things we allow
+  def getPointerCoercion[G](
+      source: Type[G],
+      target: Type[G],
+      innerSource: Type[G],
+      innerTarget: Type[G],
+  ): Option[Coercion[G]] = {
+    Some((innerSource, innerTarget) match {
+      case (l, r) if l == r => CoerceIdentity(source)
+      case (TCInt(), TInt()) => CoerceIdentity(source)
+      case (CPrimitiveType(specs), r) =>
+        specs.collectFirst { case spec: CSpecificationType[G] => spec } match {
+          case Some(CSpecificationType(t)) =>
+            return getPointerCoercion(source, target, t, r)
+          case None => return None
+        }
+      case (l, CPrimitiveType(specs)) =>
+        specs.collectFirst { case spec: CSpecificationType[G] => spec } match {
+          case Some(CSpecificationType(t)) =>
+            return getPointerCoercion(source, target, l, t)
+          case None => return None
+        }
+      case (TUnique(l, _), TUnique(r, _)) =>
+        if (l == r)
+          CoerceBetweenUniquePointer(source, target)
+        else
+          return None
+      case (TUnique(l, _), r) =>
+        if (l == r)
+          CoerceFromUniquePointer(source, target)
+        else
+          return None
+      case (l, TUnique(r, _)) =>
+        if (l == r)
+          CoerceToUniquePointer(source, target)
+        else
+          return None
+      case (t: CTStructUnique[G], s)
+          if C.stripUniqueType(t) == C.stripUniqueType(s) =>
+        CoerceBetweenUniqueStruct(source, target)
+      case (t, s: CTStructUnique[G])
+          if C.stripUniqueType(t) == C.stripUniqueType(s) =>
+        CoerceBetweenUniqueStruct(source, target)
+      case (s: TClass[G], TClassUnique(innerClass, _)) if s == innerClass =>
+        CoerceBetweenUniqueClass(source, target)
+      case (TClassUnique(innerClass, _), t: TClass[G]) if innerClass == t =>
+        CoerceBetweenUniqueClass(source, target)
+      case (TClassUnique(clsS, _), TClassUnique(clsT, _)) if clsS == clsT =>
+        CoerceBetweenUniqueClass(source, target)
+      case _ => return None
+    })
+  }
+
   def getAnyCoercion[G](
       source: Type[G],
       target: Type[G],
@@ -25,7 +78,56 @@ case object CoercionUtils {
         return Some(CoerceIdentity(source))
       case (TNothing(), _) => CoerceNothingSomething(target)
       case (_, TAny()) => CoerceSomethingAny(source)
-
+      case (TUnique(source, si), TUnique(target, ti)) =>
+        val coercion = getAnyCoercion(source, target).getOrElse(return None)
+        if (si == ti) { coercion }
+        else { CoerceBetweenUnique(si, ti, coercion) }
+      case (TUnique(source, si), target) =>
+        if (source == target) { CoerceFromUnique(source, si) }
+        else {
+          val inner = getAnyCoercion(source, target).getOrElse(return None)
+          CoercionSequence(Seq(CoerceFromUnique(source, si), inner))
+        }
+      case (source, TUnique(target, ti)) =>
+        if (source == target) { CoerceToUnique(target, ti) }
+        else {
+          val inner = getAnyCoercion(source, target).getOrElse(return None)
+          CoercionSequence(Seq(inner, CoerceToUnique(target, ti)))
+        }
+      case (t: CTStructUnique[G], s)
+          if C.stripUniqueType(t) == C.stripUniqueType(s) =>
+        CoerceBetweenUniqueStruct(t, s)
+      case (t, s: CTStructUnique[G])
+          if C.stripUniqueType(t) == C.stripUniqueType(s) =>
+        CoerceBetweenUniqueStruct(t, s)
+      case (TConst(source), TConst(target)) =>
+        getAnyCoercion(source, target).getOrElse(return None)
+      case (source, TConst(target)) =>
+        if (source == target) {
+          source match {
+            case _: TRef[G] => return None
+            case _: PrimitiveType[G] =>
+            case _: CompositeType[G] =>
+            case _ => return None
+          }
+          CoerceToConst(target)
+        } else {
+          val inner = getAnyCoercion(source, target).getOrElse(return None)
+          CoercionSequence(Seq(inner, CoerceToConst(target)))
+        }
+      case (TConst(source), target) =>
+        if (source == target) {
+          source match {
+            case _: TRef[G] => return None
+            case _: PrimitiveType[G] =>
+            case _: CompositeType[G] =>
+            case _ => return None
+          }
+          CoerceFromConst(source)
+        } else {
+          val inner = getAnyCoercion(source, target).getOrElse(return None)
+          CoercionSequence(Seq(CoerceFromConst(source), inner))
+        }
       case (TResource(), TAnyValue()) =>
         CoercionSequence(Seq(
           CoerceResourceResourceVal(),
@@ -123,15 +225,19 @@ case object CoercionUtils {
 
       case (TNull(), TRef()) => CoerceNullRef()
       case (TNull(), TArray(target)) => CoerceNullArray(target)
-      case (TNull(), TClass(target, typeArgs)) =>
+      case (TNull(), TByReferenceClass(target, typeArgs)) =>
         CoerceNullClass(target, typeArgs)
+      case (TNull(), target @ TClassUnique(_, _)) =>
+        getAnyCoercion(TNull(), target.inner).getOrElse(return None)
       case (TNull(), JavaTClass(target, _)) => CoerceNullJavaClass(target)
       case (TNull(), TAnyClass()) => CoerceNullAnyClass()
-      case (TNull(), TPointer(target)) => CoerceNullPointer(target)
-      case (TNull(), CTPointer(target)) => CoerceNullPointer(target)
+      case (TNull(), target: PointerType[G]) if !target.isNonNull =>
+        CoerceNullPointer(target)
+      case (TNull(), target: CPointerType[G]) => CoerceNullPointer(target)
       case (TNull(), TEnum(target)) => CoerceNullEnum(target)
+      case (TNull(), LLVMTPointer(target)) => CoerceNullLLVMPointer(target)
 
-      case (CTArray(_, innerType), TArray(element)) if element == innerType =>
+      case (t: CTArray[G], TArray(element)) if element == t.innerMostType =>
         CoerceCArrayPointer(element)
       case (CPPTArray(_, innerType), TArray(element)) if element == innerType =>
         CoerceCPPArrayPointer(element)
@@ -141,21 +247,137 @@ case object CoercionUtils {
       case (source @ TOpenCLVector(lSize, innerType), TVector(rSize, element))
           if element == innerType && lSize == rSize =>
         CoerceCVectorVector(rSize, element)
+      case (s @ CTPointer(innerLeft), t @ CTPointer(innerRight)) =>
+        getPointerCoercion(s, t, innerLeft, innerRight).getOrElse(return None)
+      case (s @ CTPointer(innerLeft), t @ CTPointer(innerRight)) =>
+        getPointerCoercion(s, t, innerLeft, innerRight).getOrElse(return None)
+      case (s @ TPointer(innerLeft, uniqueL), t @ TPointer(innerRight, uniqueR))
+          if uniqueL == uniqueR =>
+        getPointerCoercion(s, t, innerLeft, innerRight).getOrElse(return None)
+      case (s @ CTPointer(innerLeft), t @ TPointer(innerRight, None)) =>
+        getPointerCoercion(s, t, innerLeft, innerRight).getOrElse(return None)
+      case (s @ TPointer(innerLeft, None), t @ CTPointer(innerRight)) =>
+        getPointerCoercion(s, t, innerLeft, innerRight).getOrElse(return None)
+      case (TNonNullPointer(innerType, uniqueL), TPointer(element, uniqueR))
+          if uniqueL == uniqueR && innerType == element =>
+        CoerceNonNullPointer(target)
+      case (TNonNullConstPointer(innerType), TConstPointer(element))
+          if innerType == element =>
+        CoerceNonNullPointer(target)
+      case (TNonNullPointer(a, uniqueL), TNonNullPointer(b, uniqueR))
+          if uniqueL == uniqueR && getAnyCoercion(a, b).isDefined =>
+        CoerceIdentity(target)
+      case (TNonNullPointer(_, _), TNonNullPointer(TVoid(), _)) =>
+        CoerceIdentity(target)
+      case (TNonNullPointer(TVoid(), _), TNonNullPointer(_, _)) =>
+        CoerceIdentity(target)
       case (
-            CTPointer(innerType),
-            TPointer(element),
-          ) => // if element == innerType =>
-        getAnyCoercion(element, innerType).getOrElse(return None)
+            TPointerArray(elementL, dimensionsL, uniqueL),
+            TPointerArray(elementR, dimensionsR, uniqueR),
+          ) if uniqueL == uniqueR && dimensionsL.length == dimensionsR.length =>
+        getPointerCoercion(source, target, elementL, elementR)
+          .getOrElse(return None)
       case (
-            TPointer(element),
-            CTPointer(innerType),
-          ) => // if element == innerType =>
-        getAnyCoercion(element, innerType).getOrElse(return None)
-      case (CTArray(_, innerType), CTPointer(element)) =>
+            TPointerArray(elementL, dimensions, uniqueL),
+            TPointer(elementR, uniqueR),
+          ) if uniqueL == uniqueR =>
+        CoercionSequence(Seq(
+          CoercePointerArrayPointer(elementL, dimensions.length, uniqueL),
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+        ))
+      case (
+            TPointer(elementL, uniqueL),
+            TPointerArray(elementR, dimensions, uniqueR),
+          )
+          if uniqueL == uniqueR && dimensions.length == 1 ||
+            elementL.asPointerArray.isDefined &&
+            elementL.asPointerArray.get.dimensions.length ==
+            dimensions.length - 1 =>
+        CoercionSequence(Seq(
+          CoercePointerNonNull(TNonNullPointer(elementL, uniqueL)),
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+          CoercePointerPointerArray(elementL, dimensions, uniqueL),
+        ))
+      case (
+            TNonNullPointer(elementL, uniqueL),
+            TPointerArray(elementR, dimensions, uniqueR),
+          )
+          if uniqueL == uniqueR && dimensions.length == 1 ||
+            elementL.asPointerArray.isDefined &&
+            elementL.asPointerArray.get.dimensions.length ==
+            dimensions.length - 1 =>
+        CoercionSequence(Seq(
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+          CoercePointerPointerArray(elementL, dimensions, uniqueL),
+        ))
+      case (
+            TConstPointerArray(elementL, dimensionsL),
+            TConstPointerArray(elementR, dimensionsR),
+          ) if dimensionsL.length == dimensionsR.length =>
+        getPointerCoercion(source, target, elementL, elementR)
+          .getOrElse(return None)
+      case (
+            TConstPointerArray(elementL, dimensions),
+            TConstPointer(elementR),
+          ) =>
+        CoercionSequence(Seq(
+          CoerceConstPointerArrayPointer(elementL, dimensions.length),
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+        ))
+      case (TConstPointer(elementL), TConstPointerArray(elementR, dimensions))
+          if dimensions.length == 1 ||
+            elementL.asPointerArray.isDefined &&
+            elementL.asPointerArray.get.dimensions.length ==
+            dimensions.length - 1 =>
+        CoercionSequence(Seq(
+          CoercePointerNonNull(TNonNullConstPointer(elementL)),
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+          CoerceConstPointerPointerArray(elementL, dimensions),
+        ))
+      case (
+            TNonNullConstPointer(elementL),
+            TConstPointerArray(elementR, dimensions),
+          )
+          if dimensions.length == 1 ||
+            elementL.asPointerArray.isDefined &&
+            elementL.asPointerArray.get.dimensions.length ==
+            dimensions.length - 1 =>
+        CoercionSequence(Seq(
+          getPointerCoercion(source, target, elementL, elementR)
+            .getOrElse(return None),
+          CoerceConstPointerPointerArray(elementL, dimensions),
+        ))
+      // Below two cases are for AddrOf struct fields which return unique non-null pointers before the TUnique qualifier is removed by the TypeQualifierCoercion
+      case (
+            s @ TNonNullPointer(a, Some(uniqueA)),
+            t @ TPointer(TUnique(b, uniqueB), None),
+          ) if uniqueA == uniqueB =>
+        getPointerCoercion(s, t, a, b).getOrElse(return None)
+      case (
+            s @ TNonNullPointer(a, Some(uniqueA)),
+            t @ CTPointer(TUnique(b, uniqueB)),
+          ) if uniqueA == uniqueB =>
+        getPointerCoercion(s, t, a, b).getOrElse(return None)
+      case (at: CTArray[G], t @ CTPointer(element)) =>
+        val innerType = at.innerMostType
         if (element == innerType) { CoerceCArrayPointer(innerType) }
         else {
           CoercionSequence(Seq(
             CoerceCArrayPointer(element),
+            getPointerCoercion(CTPointer(innerType), t, innerType, element)
+              .getOrElse(return None),
+          ))
+        }
+      case (CPPTArray(_, innerType), TPointer(element, None)) =>
+        if (element == innerType) { CoerceCPPArrayPointer(innerType) }
+        else {
+          CoercionSequence(Seq(
+            CoerceCPPArrayPointer(element),
             getAnyCoercion(element, innerType).getOrElse(return None),
           ))
         }
@@ -198,7 +420,15 @@ case object CoercionUtils {
           CoerceDecreasePrecision(source, coercedCFloat),
           CoerceCFloatFloat(coercedCFloat, target),
         ))
-      case (TCInt(), TInt()) => CoerceCIntInt()
+      case (TCInt(), TInt()) => CoerceCIntInt(source)
+      case (LLVMTInt(_), TInt()) => CoerceLLVMIntInt()
+      case (TInt(), LLVMTInt(_)) => CoerceIdentity(target)
+      case (l @ LLVMTFloat(_), TFloat(mantissa, exponent))
+          if l.mantissa == mantissa && l.exponent == exponent =>
+        CoerceIdentity(target)
+      case (TFloat(mantissa, exponent), r @ LLVMTFloat(_))
+          if r.mantissa == mantissa && r.exponent == exponent =>
+        CoerceIdentity(target)
 
       case (TBoundedInt(gte, lt), TFraction()) if gte >= 1 && lt <= 2 =>
         CoerceBoundIntFrac()
@@ -217,16 +447,24 @@ case object CoercionUtils {
         CoercionSequence(Seq(CoerceUnboundInt(source, TInt()), CoerceIntRat()))
       case (_: IntType[G], TRational()) => CoerceIntRat()
 
-      case (
-            source @ TClass(sourceClass, Seq()),
-            target @ TClass(targetClass, Seq()),
-          ) if source.transSupportArrows.exists { case (_, supp) =>
-            supp.cls.decl == targetClass.decl
-          } =>
-        CoerceSupports(sourceClass, targetClass)
+      case (source: TClass[G], target: TClassUnique[G])
+          if source.cls == target.cls =>
+        CoerceBetweenUniqueClass(source, target)
+      case (source: TClassUnique[G], target: TClass[G])
+          if source.cls == target.cls =>
+        CoerceBetweenUniqueClass(source, target)
+      case (source: TClass[G], target: TClass[G])
+          if source.typeArgs.isEmpty && target.typeArgs.isEmpty &&
+            source.transSupportArrows().exists { case (_, supp) =>
+              supp.cls.decl == target.cls.decl
+            } =>
+        CoerceSupports(source.cls, target.cls)
 
-      case (source @ TClass(sourceClass, typeArgs), TAnyClass()) =>
-        CoerceClassAnyClass(sourceClass, typeArgs)
+      case (source: TClass[G], TAnyClass()) =>
+        CoerceClassAnyClass(source.cls, source.typeArgs)
+
+      case (source: TClassUnique[G], TAnyClass()) =>
+        CoerceClassAnyClass(source.cls, Seq())
 
       case (
             source @ JavaTClass(sourceClass, Nil),
@@ -257,13 +495,16 @@ case object CoercionUtils {
       case (TCInt(), target @ TCFloat(_, _)) => CoerceCIntCFloat(target)
 
       case (source @ TCFloat(_, _), TInt()) =>
-        CoercionSequence(Seq(CoerceCFloatCInt(source), CoerceCIntInt()))
+        CoercionSequence(Seq(CoerceCFloatCInt(source), CoerceCIntInt(TCInt())))
       case (TCInt(), target @ TFloat(exponent, mantissa)) =>
         val coercedCFloat = TCFloat[G](exponent, mantissa)
         CoercionSequence(Seq(
           CoerceCIntCFloat(coercedCFloat),
           CoerceCFloatFloat(coercedCFloat, target),
         ))
+      case (CTFunction(_, _) | TVoid(), CTFunction(_, _) | TVoid()) =>
+        // Function compatibility left unchecked
+        CoerceIdentity(target)
       case (source @ CPrimitiveType(specs), target) =>
         specs.collectFirst { case spec: CSpecificationType[G] => spec } match {
           case Some(CSpecificationType(t)) =>
@@ -305,6 +546,13 @@ case object CoercionUtils {
             ))
           case None => return None
         }
+
+      case (TPointer(TAny(), uniqueL), TPointer(any, uniqueR))
+          if uniqueL == uniqueR =>
+        CoerceIdentity(TPointer(any, uniqueR))
+      case (TPointer(any, uniqueL), TPointer(TAny(), uniqueR))
+          if uniqueL == uniqueR =>
+        CoerceIdentity(TPointer(any, uniqueR))
 
       // Something with TVar?
 
@@ -378,6 +626,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySeqCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnySeqCoercion)
+      case t: TConst[G] =>
+        getAnySeqCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSeq[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnySeqCoercion(supertype)
       case _ => None
@@ -387,6 +639,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySetCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnySetCoercion)
+      case t: TConst[G] =>
+        getAnySetCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSet[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnySetCoercion(supertype)
       case _ => None
@@ -398,6 +654,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyVectorCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyVectorCoercion)
+      case t: TConst[G] =>
+        getAnyVectorCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: CTVector[G] =>
         Some((
           CoerceCVectorVector(t.intSize, t.innerType),
@@ -417,6 +677,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyBagCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyBagCoercion)
+      case t: TConst[G] =>
+        getAnyBagCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TBag[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyBagCoercion(supertype)
       case _ => None
@@ -428,6 +692,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySizedCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnySizedCoercion)
+      case t: TConst[G] =>
+        getAnySizedCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSeq[G] => Some((CoerceIdentity(source), t))
       case t: TSet[G] => Some((CoerceIdentity(source), t))
       case t: TBag[G] => Some((CoerceIdentity(source), t))
@@ -438,22 +706,65 @@ case object CoercionUtils {
 
   def getAnyPointerCoercion[G](
       source: Type[G]
-  ): Option[(Coercion[G], TPointer[G])] =
+  ): Option[(Coercion[G], PointerType[G])] =
     source match {
+      case t: TConst[G] =>
+        getAnyPointerCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
+      case t: TUnique[G] =>
+        getAnyPointerCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromUnique(t.inner, t.unique), c)), res)
+        }
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyPointerCoercion)
-      case t: TPointer[G] => Some((CoerceIdentity(source), t))
+      case t: PointerType[G] => Some((CoerceIdentity(source), t))
       case t: CTPointer[G] =>
-        Some((CoerceIdentity(source), TPointer(t.innerType)))
+        Some((CoerceIdentity(source), TPointer(t.innerType, None)))
       case t: CTArray[G] =>
-        Some((CoerceCArrayPointer(t.innerType), TPointer(t.innerType)))
+        Some((
+          CoerceCArrayPointer(t.innerMostType),
+          TPointer(t.innerMostType, None),
+        ))
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyPointerCoercion)
       case t: CPPTArray[G] =>
-        Some((CoerceCPPArrayPointer(t.innerType), TPointer(t.innerType)))
+        Some((CoerceCPPArrayPointer(t.innerType), TPointer(t.innerType, None)))
+      case LLVMTPointer(None) =>
+        Some((CoerceIdentity(source), TPointer[G](TAnyValue(), None)))
+      case LLVMTPointer(Some(innerType)) =>
+        Some((CoerceIdentity(source), TPointer(innerType, None)))
+      case LLVMTArray(numElements, innerType) if numElements > 0 =>
+        Some((CoerceIdentity(source), TPointer(innerType, None)))
+      case TPointerArray(element, dimensions, unique) =>
+        Some((
+          CoercePointerArrayPointer(element, dimensions.length, unique),
+          TPointer(element, unique),
+        ))
+      case TConstPointerArray(element, dimensions) =>
+        Some((
+          CoerceConstPointerArrayPointer(element, dimensions.length),
+          TConstPointer(element),
+        ))
       case _: TNull[G] =>
-        val t = TPointer[G](TAnyValue())
+        val t = TPointer[G](TAnyValue(), None)
         Some((CoerceNullPointer(t), t))
       case TSubtype(_, supertype, _) => getAnyPointerCoercion(supertype)
       case _ => None
+    }
+
+  def firstElementIsType[G](aggregate: Type[G], innerType: Type[G]): Boolean =
+    aggregate match {
+      case aggregate if getAnyCoercion(aggregate, innerType).isDefined => true
+      case clazz: TByValueClass[G] =>
+        clazz.cls.decl.decls.collectFirst { case field: InstanceField[G] =>
+          firstElementIsType(field.t, innerType)
+        }.getOrElse(false)
+      case TArray(element) => firstElementIsType(element, innerType)
+      case LLVMTStruct(_, _, elements) =>
+        firstElementIsType(elements.head, innerType)
+      case LLVMTArray(numElements, elementType) =>
+        numElements > 0 && firstElementIsType(elementType, innerType)
+      case LLVMTVector(_, _) => false // TODO: Should this be possible?
+      case _ => false
     }
 
   def getAnyCArrayCoercion[G](
@@ -461,6 +772,10 @@ case object CoercionUtils {
   ): Option[(Coercion[G], CTArray[G])] =
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyCArrayCoercion)
+      case t: TConst[G] =>
+        getAnyCArrayCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: CTArray[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyCArrayCoercion(supertype)
       case _ => None
@@ -471,6 +786,10 @@ case object CoercionUtils {
   ): Option[(Coercion[G], CPPTArray[G])] =
     source match {
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyCPPArrayCoercion)
+      case t: TConst[G] =>
+        getAnyCPPArrayCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: CPPTArray[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyCPPArrayCoercion(supertype)
       case _ => None
@@ -482,6 +801,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyArrayCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyArrayCoercion)
+      case t: TConst[G] =>
+        getAnyArrayCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case acc: SYCLTAccessor[G] =>
         Some((
           CoerceIdentity(source),
@@ -507,6 +830,10 @@ case object CoercionUtils {
   ): Option[(Coercion[G], TArray[G])] =
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyMatrixArrayCoercion)
+      case t: TConst[G] =>
+        getAnyMatrixArrayCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnyMatrixArrayCoercion)
       case acc: SYCLTAccessor[G] if acc.dimCount >= 2 =>
@@ -536,6 +863,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyOptionCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyOptionCoercion)
+      case t: TConst[G] =>
+        getAnyOptionCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TOption[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyOptionCoercion(supertype)
       case _ => None
@@ -545,6 +876,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyMapCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyMapCoercion)
+      case t: TConst[G] =>
+        getAnyMapCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TMap[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyMapCoercion(supertype)
       case _ => None
@@ -556,6 +891,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyTupleCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyTupleCoercion)
+      case t: TConst[G] =>
+        getAnyTupleCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TTuple[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyTupleCoercion(supertype)
       case _ => None
@@ -567,6 +906,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyMatrixCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyMatrixCoercion)
+      case t: TConst[G] =>
+        getAnyMatrixCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TMatrix[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyMatrixCoercion(supertype)
       case _ => None
@@ -578,6 +921,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyModelCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyModelCoercion)
+      case t: TConst[G] =>
+        getAnyModelCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TModel[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyModelCoercion(supertype)
       case _ => None
@@ -589,8 +936,12 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyClassCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyClassCoercion)
+      case t: TConst[G] =>
+        getAnyClassCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TClass[G] => Some((CoerceIdentity(source), t))
-
+      case t: TClassUnique[G] => Some((CoerceIdentity(source), t.innerT))
       case t: TUnion[G] =>
         val superType = Types.leastCommonSuperType(t.types)
         getAnyClassCoercion(superType) match {
@@ -616,6 +967,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyEitherCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyEitherCoercion)
+      case t: TConst[G] =>
+        getAnyEitherCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TEither[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyEitherCoercion(supertype)
       case _ => None
@@ -627,6 +982,10 @@ case object CoercionUtils {
     source match {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnyBitvecCoercion)
       case t: CPPPrimitiveType[G] => chainCPPCoercion(t, getAnyBitvecCoercion)
+      case t: TConst[G] =>
+        getAnyBitvecCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSmtlibBitVector[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnyBitvecCoercion(supertype)
       case _ => None
@@ -639,6 +998,10 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySmtlibFloatCoercion)
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibFloatCoercion)
+      case t: TConst[G] =>
+        getAnySmtlibFloatCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSmtlibFloatingPoint[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnySmtlibFloatCoercion(supertype)
       case _ => None
@@ -651,6 +1014,10 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySmtlibArrayCoercion)
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibArrayCoercion)
+      case t: TConst[G] =>
+        getAnySmtlibArrayCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSmtlibArray[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnySmtlibArrayCoercion(supertype)
       case _ => None
@@ -663,6 +1030,10 @@ case object CoercionUtils {
       case t: CPrimitiveType[G] => chainCCoercion(t, getAnySmtlibSeqCoercion)
       case t: CPPPrimitiveType[G] =>
         chainCPPCoercion(t, getAnySmtlibSeqCoercion)
+      case t: TConst[G] =>
+        getAnySmtlibSeqCoercion(t.inner).map { case (c, res) =>
+          (CoercionSequence(Seq(CoerceFromConst(t.inner), c)), res)
+        }
       case t: TSmtlibSeq[G] => Some((CoerceIdentity(source), t))
       case TSubtype(_, supertype, _) => getAnySmtlibSeqCoercion(supertype)
       case _ => None

@@ -106,6 +106,11 @@ sealed trait CheckError {
           context(a) ->
             "This dereference does not take place on one of the endpoints in the surrounding `seq_prog`."
         )
+      case ChorStatement(s @ vct.col.ast.ChorStatement(_: Assign[_])) =>
+        Seq(
+          context(s) ->
+            "Plain assignment is not allowed in `choreography`, only assignment using `:=`."
+        )
       case ChorStatement(s) =>
         Seq(context(s) -> "This statement is not allowed in `choreography`.")
       case SeqProgInstanceMethodArgs(m) =>
@@ -139,12 +144,57 @@ sealed trait CheckError {
       case SeqProgNoParticipant(s) =>
         Seq(
           context(s) ->
-            s"Unclear what the participating endpoint is in this statement"
+            s"Unclear what the participating endpoint is in this statement."
         )
       case SeqProgEndpointAssign(a) =>
         Seq(context(a) -> s"Raw assignment to an endpoint is not allowed.")
       case SeqProgInstanceMethodPure(m) =>
-        Seq(context(m) -> s"Instance methods in seq_programs cannot be pure.")
+        Seq(context(m) -> s"Instance methods in choreographies cannot be pure.")
+      case ChorNonTrivialContextEverywhere(e) =>
+        Seq(context(e) -> s"Context everywhere is not supported here.")
+      case ChorInEndpointExpr(e) =>
+        Seq(context(e) -> s"`\\chor` not allowed in `\\endpoint`.")
+      case OnlyInChannelInvariant(e) =>
+        Seq(
+          context(e) ->
+            s"This expression is only allowed within a `channel_invariant` clause."
+        )
+      case InconsistentEndpointExprNesting(outer, inner) =>
+        Seq(
+          context(outer) ->
+            "The endpoint referenced in the outer expression here...",
+          context(inner) -> "...differs from the endpoint referenced here",
+        )
+      case SupportNotAClass(cls, support) =>
+        Seq(
+          context(cls) ->
+            s"This class cannot extend or implement the type $support since it is not a class"
+        )
+      case OldInPrecondition(expr) =>
+        Seq(context(expr) -> "\\old may not be used in a precondition")
+      case OldInFunctionContract(expr) =>
+        Seq(
+          context(expr) ->
+            "\\old may not be used in function (a.k.a pure procedure) contracts"
+        )
+      case ResourceInPostcondition(expr) =>
+        Seq(
+          context(expr) ->
+            "Resource terms may not appear in the postcondition of functions (a.k.a pure procedures)"
+        )
+      case RecursiveFunctionWithoutTerminationMeasure(expr, suggestResult) =>
+        Seq(
+          context(expr) ->
+            ("Recursive function calls in contracts are only allowed for functions with a termination measure" +
+              (if (suggestResult) {
+                 " (Hint: use \\result to refer to the output of the function)"
+               } else { "" }))
+        )
+      case IncorrectArgumentAmount(expr, gotCount, expectedCount) =>
+        Seq(
+          context(expr) ->
+            s"This invocation has the wrong number of arguments, got: $gotCount expected: $expectedCount"
+        )
     }): _*)
 
   def subcode: String
@@ -199,7 +249,7 @@ case class TupleTypeCount(tup: LiteralTuple[_]) extends CheckError {
 case class NotAPredicateApplication(res: Expr[_]) extends CheckError {
   val subcode = "notAPredicateApplication"
 }
-case class AbstractPredicate(res: Expr[_]) extends CheckError {
+case class AbstractPredicate(res: FoldTarget[_]) extends CheckError {
   val subcode = "abstractPredicate"
 }
 case class RedundantCatchClause(clause: CatchClause[_]) extends CheckError {
@@ -243,11 +293,50 @@ case class SeqProgParticipant(s: Node[_]) extends CheckError {
 case class SeqProgNoParticipant(s: Node[_]) extends CheckError {
   val subcode = "seqProgNoParticipant"
 }
-case class SeqProgEndpointAssign(a: Assign[_]) extends CheckError {
+case class SeqProgEndpointAssign(a: AssignStmt[_]) extends CheckError {
   val subcode = "seqProgEndpointAssign"
 }
 case class SeqProgInstanceMethodPure(m: InstanceMethod[_]) extends CheckError {
   val subcode = "seqProgInstanceMethodPure"
+}
+case class ChorNonTrivialContextEverywhere(expr: Node[_]) extends CheckError {
+  val subcode = "chorNonTrivialContextEverywhere"
+}
+case class ChorInEndpointExpr(expr: Node[_]) extends CheckError {
+  val subcode = "chorInEndpointExpr"
+}
+case class OnlyInChannelInvariant(expr: Node[_]) extends CheckError {
+  val subcode = "onlyInChannelInvariant"
+}
+case class InconsistentEndpointExprNesting(outer: Node[_], inner: Node[_])
+    extends CheckError {
+  val subcode = "inconsistentEndpointExprNesting"
+}
+case class SupportNotAClass(cls: Node[_], support: Type[_]) extends CheckError {
+  val subcode = "supportNotAClass"
+}
+case class OldInPrecondition(expr: Node[_]) extends CheckError {
+  val subcode = "oldInPrecondition"
+}
+case class OldInFunctionContract(expr: Node[_]) extends CheckError {
+  val subcode = "oldInFunction"
+}
+case class ResourceInPostcondition(node: Node[_]) extends CheckError {
+  val subcode = "resourceInPostcondition"
+}
+case class RecursiveFunctionWithoutTerminationMeasure(
+    node: Node[_],
+    suggestResult: Boolean,
+) extends CheckError {
+  val subcode = "missingTerminationMeasure"
+}
+// Mostly for catching wrong generated calls (Resolution catches most of these when they come from the user)
+case class IncorrectArgumentAmount(
+    node: Node[_],
+    gotCount: Int,
+    expectedCount: Int,
+) extends CheckError {
+  val subcode = "incorrectArgumentAmount"
 }
 
 case object CheckContext {
@@ -277,6 +366,9 @@ case class CheckContext[G](
     currentChoreography: Option[Choreography[G]] = None,
     currentReceiverEndpoint: Option[Endpoint[G]] = None,
     currentParticipatingEndpoints: Option[Set[Endpoint[G]]] = None,
+    inChor: Boolean = false,
+    inEndpointExpr: Option[EndpointExpr[G]] = None,
+    inCommunicateInvariant: Option[Communicate[G]] = None,
     declarationStack: Seq[Declaration[G]] = Nil,
 ) {
   def withScope(decls: Seq[Declaration[G]]): Seq[CheckContext.ScopeFrame[G]] =
@@ -311,6 +403,9 @@ case class CheckContext[G](
 
   def withReceiverEndpoint(endpoint: Endpoint[G]): CheckContext[G] =
     copy(currentReceiverEndpoint = Some(endpoint))
+
+  def withCommunicateInvariant(communicate: Communicate[G]): CheckContext[G] =
+    copy(inCommunicateInvariant = Some(communicate))
 
   def withCurrentParticipatingEndpoints(
       endpoints: Seq[Endpoint[G]]

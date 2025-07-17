@@ -14,13 +14,9 @@ import viper.api.transform.SilverToCol.{
 import viper.silver.ast.{
   AbstractSourcePosition,
   FilePosition,
-  HasIdentifier,
-  HasLineColumn,
-  IdentifierPosition,
   LineColumnPosition,
   NoPosition,
   SourcePosition,
-  TranslatedPosition,
   VirtualPosition,
 }
 import viper.silver.plugin.standard.termination.{
@@ -31,8 +27,6 @@ import viper.silver.plugin.standard.termination.{
 }
 import viper.silver.verifier.AbstractError
 import viper.silver.{ast => silver}
-
-import java.nio.file.{Path, Paths}
 
 case object SilverToCol {
   private def SilverPositionOrigin(node: silver.Positioned): Origin =
@@ -70,7 +64,7 @@ case object SilverToCol {
         })
   }
 
-  case class SilverFrontendParseError(path: Path, errors: Seq[AbstractError])
+  case class SilverFrontendParseError(path: String, errors: Seq[AbstractError])
       extends UserError {
     override def code: String = "silverFrontendError"
     override def text: String =
@@ -82,36 +76,22 @@ case object SilverToCol {
   }
 
   def transform[G](
-      diagnosticPath: Path,
+      diagnosticFilename: String,
       in: Either[Seq[AbstractError], silver.Program],
       blameProvider: BlameProvider,
   ): col.Program[G] =
     in match {
       case Right(program) => SilverToCol(program, blameProvider).transform()
       case Left(errors) =>
-        throw SilverFrontendParseError(diagnosticPath, errors)
+        throw SilverFrontendParseError(diagnosticFilename, errors)
     }
-
-  def parse[G](path: Path, blameProvider: BlameProvider): col.Program[G] =
-    transform(path, SilverParserDummyFrontend().parse(path), blameProvider)
-
-  def parse[G](
-      input: String,
-      diagnosticPath: Path,
-      blameProvider: BlameProvider,
-  ): col.Program[G] =
-    transform(
-      diagnosticPath,
-      SilverParserDummyFrontend().parse(input, diagnosticPath),
-      blameProvider,
-    )
 
   def parse[G](
       readable: Readable,
       blameProvider: BlameProvider,
   ): col.Program[G] =
     transform(
-      Paths.get(readable.fileName),
+      readable.fileName,
       SilverParserDummyFrontend().parse(readable),
       blameProvider,
     )
@@ -230,6 +210,7 @@ case class SilverToCol[G](
               foldStar(posts.map(transform))(origin(func))
             )(origin(func)),
           contextEverywhere = tt,
+          kernelInvariant = tt,
           signals = Nil,
           givenArgs = Nil,
           yieldsArgs = Nil,
@@ -276,6 +257,7 @@ case class SilverToCol[G](
               foldStar(posts.map(transform))(origin(proc))
             )(origin(proc)),
           contextEverywhere = tt,
+          kernelInvariant = tt,
           signals = Nil,
           givenArgs = Nil,
           yieldsArgs = Nil,
@@ -310,8 +292,14 @@ case class SilverToCol[G](
       case silver.Inhale(exp) => col.Inhale(transform(exp))(origin(s))
       case silver.Assert(exp) => col.Assert(transform(exp))(blame(s))(origin(s))
       case silver.Assume(exp) => col.Assume(transform(exp))(origin(s))
-      case silver.Fold(acc) => col.Fold(transform(acc))(blame(s))(origin(s))
-      case silver.Unfold(acc) => col.Unfold(transform(acc))(blame(s))(origin(s))
+      case silver.Fold(acc) =>
+        col.Fold(col.AmbiguousFoldTarget(transform(acc))(origin(acc)))(blame(
+          s
+        ))(origin(s))
+      case silver.Unfold(acc) =>
+        col.Unfold(col.AmbiguousFoldTarget(transform(acc))(origin(acc)))(blame(
+          s
+        ))(origin(s))
       case silver.Seqn(ss, scopedDecls) =>
         val vars = scopedDecls.flatMap {
           case decl @ silver.LocalVarDecl(_, typ) =>
@@ -462,7 +450,7 @@ case class SilverToCol[G](
             f(loc.rcv),
             new UnresolvedRef(loc.field.name),
           ),
-          f(perm),
+          f(perm.getOrElse(silver.FullPerm()())),
         )
       case silver.Forall(variables, triggers, exp) =>
         if (exp.isPure)
@@ -526,20 +514,19 @@ case class SilverToCol[G](
       case silver.PermMul(left, right) => col.Mult(f(left), f(right))
       case silver.PermSub(left, right) => col.Minus(f(left), f(right))
       case silver.PredicateAccess(args, predicateName) =>
-        col.PredicateApply(
-          new UnresolvedRef(predicateName),
-          args.map(f),
-          col.WritePerm(),
+        col.PredicateApplyExpr(
+          col.PredicateApply(new UnresolvedRef(predicateName), args.map(f))
         )
       case silver.PredicateAccessPredicate(
             silver.PredicateAccess(args, predicateName),
             perm,
           ) =>
-        col.PredicateApply(
-          new UnresolvedRef(predicateName),
-          args.map(f),
-          f(perm),
-        )
+        col.Scale[G](
+          f(perm.getOrElse(silver.FullPerm()())),
+          col.PredicateApplyExpr(
+            col.PredicateApply(new UnresolvedRef(predicateName), args.map(f))
+          ),
+        )(blame(e))
       case silver.RangeSeq(low, high) => col.Range(f(low), f(high))
       case silver.Result(typ) => col.AmbiguousResult()
       case silver.SeqAppend(left, right) => col.Concat(f(left), f(right))
@@ -553,12 +540,13 @@ case class SilverToCol[G](
       case silver.Sub(left, right) => col.Minus(f(left), f(right))
       case silver.TrueLit() => col.BooleanValue(true)
       case silver.Unfolding(acc, body) =>
-        col.Unfolding(f(acc), f(body))(blame(e))
+        col.Unfolding(col.AmbiguousFoldTarget(f(acc)), f(body))(blame(e))
+      case silver.Asserting(a, body) => col.Asserting(f(a), f(body))(blame(e))
       case silver.WildcardPerm() => col.ReadPerm()
 
       case silver.ForPerm(variables, resource, body) => ??(e)
       case silver.EpsilonPerm() => ??(e)
-      case silver.InhaleExhaleExp(in, ex) => ??(e)
+      case silver.InhaleExhaleExp(in, ex) => col.PolarityDependent(f(in), f(ex))
       case silver.MagicWand(left, right) => ??(e)
       case silver.Applying(wand, body) => ??(e)
       case silver.BackendFuncApp(backendFunc, args) => ??(e)

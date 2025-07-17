@@ -33,7 +33,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
     genericArgs match {
       case Seq(
             CPPExprOrTypeSpecifier(None, Some(typeSpec)),
-            CPPExprOrTypeSpecifier(Some(CIntegerValue(dim)), None),
+            CPPExprOrTypeSpecifier(Some(CIntegerValue(dim, _)), None),
           )
           if dim > 0 && dim <= 3 && args.nonEmpty &&
             args.head.t.asPointer.isDefined &&
@@ -91,7 +91,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
   // resource exclusive_hostData_access(TYPE* hostData, int range) = \pointer(hostData, range, write);
   def generateExclusiveAccessPredicate(): Predicate[G] = {
     val hostDataVar =
-      new Variable[G](TPointer(this.typ))(o.where(name = "hostData"))
+      new Variable[G](TPointer(this.typ, None))(o.where(name = "hostData"))
     val sizeVar =
       new Variable[G](TInt())(
         o.where(name = "size")
@@ -114,7 +114,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
   // TYPE[] copy_hostdata_to_buffer(TYPE* hostData, int size);
   def generateCopyHostDataToBufferProcedure(): Procedure[G] = {
     val hostDataVar =
-      new Variable[G](TPointer(this.typ))(o.where(name = "hostData"))
+      new Variable[G](TPointer(this.typ, None))(o.where(name = "hostData"))
     val sizeVar = new Variable[G](TCInt())(o.where(name = "size"))
     val indexVar = new Variable[G](TCInt())(o.where(name = "i"))
     val copyHostdataToBufferBlame = PanicBlame(
@@ -171,6 +171,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
               ),
             ))),
             contextEverywhere = tt,
+            kernelInvariant = tt,
             signals = Nil,
             givenArgs = Nil,
             yieldsArgs = Nil,
@@ -189,7 +190,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
   ): Procedure[G] = {
     val bufferVar = new Variable[G](TArray(this.typ))(o.where(name = "buffer"))
     val hostDataVar =
-      new Variable[G](TPointer(this.typ))(o.where(name = "hostData"))
+      new Variable[G](TPointer(this.typ, None))(o.where(name = "hostData"))
     val indexVar = new Variable[G](TCInt())(o.where(name = "i"))
     val copyBufferToHostdataBlame = PanicBlame(
       "The generated method 'copy_buffer_to_hostData' should not throw any errors."
@@ -210,7 +211,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
               ReadPerm(),
               copyBufferToHostdataBlame,
             ),
-            predApply(
+            predApplyExpr(
               exclusiveAccessPredRef,
               hostDataVar,
               Length(Local[G](bufferVar.ref))(copyBufferToHostdataBlame),
@@ -223,13 +224,13 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
               ReadPerm(),
               copyBufferToHostdataBlame,
             ),
-            predApply(
+            predApplyExpr(
               exclusiveAccessPredRef,
               hostDataVar,
               Length(Local[G](bufferVar.ref))(copyBufferToHostdataBlame),
             ),
             Unfolding(
-              predApply(
+              predApplyTarget(
                 exclusiveAccessPredRef,
                 hostDataVar,
                 Length(Local[G](bufferVar.ref))(copyBufferToHostdataBlame),
@@ -261,6 +262,7 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
             )(copyBufferToHostdataBlame),
           ))),
           contextEverywhere = tt,
+          kernelInvariant = tt,
           signals = Nil,
           givenArgs = Nil,
           yieldsArgs = Nil,
@@ -285,11 +287,26 @@ trait SYCLTBufferImpl[G] extends SYCLTBufferOps[G] {
       exclusiveAccessPredRef: Ref[G, Predicate[G]],
       hostData: Variable[G],
       len: Expr[G],
-  ): Expr[G] = {
-    PredicateApply[G](
-      exclusiveAccessPredRef,
-      Seq(Local[G](hostData.ref), len),
+  ): PredicateApply[G] = {
+    PredicateApply[G](exclusiveAccessPredRef, Seq(Local[G](hostData.ref), len))
+  }
+
+  private def predApplyTarget(
+      exclusiveAccessPredRef: Ref[G, Predicate[G]],
+      hostData: Variable[G],
+      len: Expr[G],
+  ): FoldTarget[G] = {
+    ScaledPredicateApply(
+      predApply(exclusiveAccessPredRef, hostData, len),
       WritePerm(),
     )
+  }
+
+  private def predApplyExpr(
+      exclusiveAccessPredRef: Ref[G, Predicate[G]],
+      hostData: Variable[G],
+      len: Expr[G],
+  ): Expr[G] = {
+    PredicateApplyExpr(predApply(exclusiveAccessPredRef, hostData, len))
   }
 }

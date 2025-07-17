@@ -470,30 +470,30 @@ case class CPPToCol[G](
     expr match {
       case InclusiveOrExpression0(inner) => convert(inner)
       case InclusiveOrExpression1(left, _, right) =>
-        BitOr(convert(left), convert(right))
+        BitOr(convert(left), convert(right), 0, signed = true)(blame(expr))
     }
 
   def convert(implicit expr: ExclusiveOrExpressionContext): Expr[G] =
     expr match {
       case ExclusiveOrExpression0(inner) => convert(inner)
       case ExclusiveOrExpression1(left, _, right) =>
-        BitXor(convert(left), convert(right))
+        BitXor(convert(left), convert(right), 0, signed = true)(blame(expr))
     }
 
   def convert(implicit expr: AndExpressionContext): Expr[G] =
     expr match {
       case AndExpression0(inner) => convert(inner)
       case AndExpression1(left, _, right) =>
-        BitAnd(convert(left), convert(right))
+        BitAnd(convert(left), convert(right), 0, signed = true)(blame(expr))
     }
 
   def convert(implicit expr: EqualityExpressionContext): Expr[G] =
     expr match {
       case EqualityExpression0(inner) => convert(inner)
       case EqualityExpression1(left, _, right) =>
-        AmbiguousEq(convert(left), convert(right), TCInt())
+        AmbiguousEq(convert(left), convert(right), TCInt(), None)
       case EqualityExpression2(left, _, right) =>
-        AmbiguousNeq(convert(left), convert(right), TCInt())
+        AmbiguousNeq(convert(left), convert(right), TCInt(), None)
     }
 
   def convert(implicit expr: RelationalExpressionContext): Expr[G] =
@@ -501,10 +501,10 @@ case class CPPToCol[G](
       case RelationalExpression0(inner) => convert(inner)
       case RelationalExpression1(left, RelationalOp0(op), right) =>
         op match {
-          case "<" => col.AmbiguousLess(convert(left), convert(right))
-          case ">" => col.AmbiguousGreater(convert(left), convert(right))
-          case "<=" => AmbiguousLessEq(convert(left), convert(right))
-          case ">=" => AmbiguousGreaterEq(convert(left), convert(right))
+          case "<" => col.AmbiguousLess(convert(left), convert(right), None)
+          case ">" => col.AmbiguousGreater(convert(left), convert(right), None)
+          case "<=" => AmbiguousLessEq(convert(left), convert(right), None)
+          case ">=" => AmbiguousGreaterEq(convert(left), convert(right), None)
         }
       case RelationalExpression1(left, RelationalOp1(specOp), right) =>
         convert(expr, specOp, convert(left), convert(right))
@@ -514,9 +514,15 @@ case class CPPToCol[G](
     expr match {
       case ShiftExpression0(inner) => convert(inner)
       case ShiftExpression1(left, _, _, right) =>
-        BitShl(convert(left), convert(right))
+        BitShl(convert(left), convert(right), 0, signed = true)(blame(expr))
       case ShiftExpression2(left, _, _, right) =>
-        BitShr(convert(left), convert(right))
+        val l = convert(left)
+        val r = convert(right)
+        // The true in BitUShr will be replaced in LangSpecificToCol
+        if (isSigned(l.t) || isSigned(r.t))
+          BitShr(l, r, 0)(blame(expr))
+        else
+          BitUShr(l, r, 0, signed = true)(blame(expr))
     }
 
   def convert(implicit expr: AdditiveExpressionContext): Expr[G] =
@@ -759,13 +765,16 @@ case class CPPToCol[G](
     } catch { case _: NumberFormatException => None }
   }
 
-  def parseInt(i: String)(implicit o: Origin): Option[Expr[G]] =
-    try { Some(CIntegerValue(BigInt(i))) }
+  def parseInt(i: String)(implicit o: Origin): Option[Expr[G]] = {
+    // TODO: Proper integer parsing and typing
+    try { Some(CIntegerValue(BigInt(i), CPrimitiveType(Seq(CInt())))) }
     catch { case _: NumberFormatException => None }
+  }
 
   private def parseChar(value: String)(implicit o: Origin): Option[Expr[G]] = {
     val fixedValue = fixEscapeAndUnicodeChars(value)
-    val pattern = "^'(.|\n|\r)'$".r
+    // Only allow characters that fit 1 char in UTF-8, the assumed execution character set
+    val pattern = "^'([ -~\n\r])'$".r
     fixedValue match {
       case pattern(char, _*) => Some(CharValue(char.codePointAt(0)))
       case _ => None
@@ -897,53 +906,39 @@ case class CPPToCol[G](
           case _ => ??(typeSpec)
         }
       case SimpleTypeSpecifier1(_, _, _) => ??(typeSpec)
-      case SimpleTypeSpecifier2(signedness) => Seq(convert(signedness))
-      case SimpleTypeSpecifier3(Some(signedness), typeLengthMods) =>
-        Seq(convert(signedness)) ++ typeLengthMods.map(convert(_))
-      case SimpleTypeSpecifier3(None, typeLengthMods) =>
-        typeLengthMods.map(convert(_))
-      case SimpleTypeSpecifier4(Some(signedness), _) =>
-        Seq(convert(signedness), new CPPChar[G]())
-      case SimpleTypeSpecifier4(None, _) => Seq(new CPPChar[G]())
-      case SimpleTypeSpecifier5(_, _) => ??(typeSpec)
-      case SimpleTypeSpecifier6(_, _) => ??(typeSpec)
-      case SimpleTypeSpecifier7(_, _) => ??(typeSpec)
-      case SimpleTypeSpecifier8(_) => Seq(new CPPBool[G]())
-      case SimpleTypeSpecifier9(Some(signedness), typeLengthMods, _) =>
-        Seq(convert(signedness)) ++ typeLengthMods.map(convert(_)) :+
-          new CPPInt[G]()
-      case SimpleTypeSpecifier9(None, typeLengthMods, _) =>
-        typeLengthMods.map(convert(_)) :+ new CPPInt[G]()
-      case SimpleTypeSpecifier10(_) =>
+      // Char
+      case SimpleTypeSpecifier2(_) => Seq(new CPPChar[G]())
+      // Char16
+      case SimpleTypeSpecifier3(_) => ??(typeSpec)
+      // Char32
+      case SimpleTypeSpecifier4(_) => ??(typeSpec)
+      // Wchar
+      case SimpleTypeSpecifier5(_) => ??(typeSpec)
+      // Bool
+      case SimpleTypeSpecifier6(_) => Seq(new CPPBool[G]())
+      // Short
+      case SimpleTypeSpecifier7(_) => ??(typeSpec)
+      // Int
+      case SimpleTypeSpecifier8(_) => Seq(new CPPInt[G]())
+      // Long
+      case SimpleTypeSpecifier9(_) => ??(typeSpec)
+      // Signed
+      case SimpleTypeSpecifier10(_) => Seq(new CPPSigned[G]())
+      // Signed
+      case SimpleTypeSpecifier11(_) => Seq(new CPPUnsigned[G]())
+      // Float
+      case SimpleTypeSpecifier12(_) =>
         Seq(CPPSpecificationType(TFloats.C_ieee754_32bit))
-      case SimpleTypeSpecifier11(Some(typeLengthMod), _) =>
-        Seq(
-          convert(typeLengthMod),
-          CPPSpecificationType(TFloats.C_ieee754_64bit),
-        )
-      case SimpleTypeSpecifier11(None, _) =>
+      // Double
+      case SimpleTypeSpecifier13(_) =>
         Seq(CPPSpecificationType(TFloats.C_ieee754_64bit))
-      case SimpleTypeSpecifier12(_) => Seq(new CPPVoid[G]())
-      case SimpleTypeSpecifier13(_) => ??(typeSpec)
-      case SimpleTypeSpecifier14(valType) =>
-        Seq(CPPSpecificationType(convert(valType)))
+      // Void
+      case SimpleTypeSpecifier14(_) => Seq(new CPPVoid[G]())
+      // Auto
       case SimpleTypeSpecifier15(_) => ??(typeSpec)
-    }
-
-  def convert(
-      implicit signedness: SimpleTypeSignednessModifierContext
-  ): CPPTypeSpecifier[G] =
-    signedness match {
-      case SimpleTypeSignednessModifier0(_) => new CPPUnsigned[G]()
-      case SimpleTypeSignednessModifier1(_) => new CPPSigned[G]()
-    }
-
-  def convert(
-      implicit simpleTypeLengthMod: SimpleTypeLengthModifierContext
-  ): CPPTypeSpecifier[G] =
-    simpleTypeLengthMod match {
-      case SimpleTypeLengthModifier0(_) => new CPPShort[G]()
-      case SimpleTypeLengthModifier1(_) => new CPPLong[G]()
+      case SimpleTypeSpecifier16(valType) =>
+        Seq(CPPSpecificationType(convert(valType)))
+      case SimpleTypeSpecifier17(_) => ??(typeSpec)
     }
 
   // Do not support template or decltypes, or a typename as identifier in the nestedname
@@ -1456,6 +1451,8 @@ case class CPPToCol[G](
           case "pure" => collector.pure += mod
           case "inline" => collector.inline += mod
           case "thread_local" => collector.threadLocal += mod
+          case "bip_annotation" =>
+            fail(mod, "This modifier is not allowed here.")
         }
       case ValStatic(_) => collector.static += mod
     }
@@ -1653,12 +1650,11 @@ case class CPPToCol[G](
       case ValPostfix2(_, idx, _, v, _) =>
         SeqUpdate(xs, convert(idx), convert(v))
       case ValPostfix3(_, name, _, args, _) =>
-        CoalesceInstancePredicateApply(
+        PredicateApplyExpr(CoalesceInstancePredicateApply(
           xs,
           new UnresolvedRef[G, InstancePredicate[G]](convert(name)),
           args.map(convert(_)).getOrElse(Nil),
-          WritePerm(),
-        )
+        ))
     }
 
   def convert(
@@ -1693,8 +1689,10 @@ case class CPPToCol[G](
       case ValPackage(_, expr, innerStat) =>
         WandPackage(convert(expr), convert(innerStat))(blame(stat))
       case ValApplyWand(_, wand, _) => WandApply(convert(wand))(blame(stat))
-      case ValFold(_, predicate, _) => Fold(convert(predicate))(blame(stat))
-      case ValUnfold(_, predicate, _) => Unfold(convert(predicate))(blame(stat))
+      case ValFold(_, predicate, _) =>
+        Fold(AmbiguousFoldTarget(convert(predicate)))(blame(stat))
+      case ValUnfold(_, predicate, _) =>
+        Unfold(AmbiguousFoldTarget(convert(predicate)))(blame(stat))
       case ValOpen(_, _, _) => ??(stat)
       case ValClose(_, _, _) => ??(stat)
       case ValAssert(_, assn, _) => Assert(convert(assn))(blame(stat))
@@ -1851,6 +1849,36 @@ case class CPPToCol[G](
             (currentNamespacePath.reverse :+ convert(name)).mkString("::")
           ))
         )
+      case ValProverType(_, name, ints, _) =>
+        Seq(new ProverType(convert(ints))(origin(decl).sourceName(
+          (currentNamespacePath.reverse :+ convert(name)).mkString("::")
+        )))
+      case ValProverFunction(_, t, name, _, args, _, ints, _) =>
+        Seq(
+          new ProverFunction(
+            convert(ints),
+            args.map(convert(_)).getOrElse(Nil),
+            convert(t),
+          )(origin(decl).sourceName(
+            (currentNamespacePath.reverse :+ convert(name)).mkString("::")
+          ))
+        )
+    }
+
+  def convert(
+      implicit int: ValProverInterpretationsContext
+  ): Seq[(ProverLanguage[G], String)] =
+    int match {
+      case ValProverInterpretations0(int) => Seq(convert(int))
+      case ValProverInterpretations1(int, ints) => convert(int) +: convert(ints)
+    }
+
+  def convert(
+      implicit int: ValProverInterpretationContext
+  ): (ProverLanguage[G], String) =
+    int match {
+      case ValInterpSmtlib(_, int) => SmtLib()(origin(int)) -> convert(int)
+      case ValInterpBoogie(_, int) => Boogie()(origin(int)) -> convert(int)
     }
 
   def convert(
@@ -2014,7 +2042,7 @@ case class CPPToCol[G](
         TMap(convert(key), convert(value))
       case ValTupleType(_, _, t1, _, t2, _) =>
         TTuple(Seq(convert(t1), convert(t2)))
-      case ValPointerType(_, _, element, _) => TPointer(convert(element))
+      case ValPointerType(_, _, element, _) => TPointer(convert(element), None)
       case ValTypeType(_, _, element, _) => TType(convert(element))
       case ValEitherType(_, _, left, _, right, _) =>
         TEither(convert(left), convert(right))
@@ -2119,6 +2147,7 @@ case class CPPToCol[G](
         PermPointer(convert(ptr), convert(n), convert(perm))
       case ValPointerIndex(_, _, ptr, _, idx, _, perm, _) =>
         PermPointerIndex(convert(ptr), convert(idx), convert(perm))
+      case ValPointerBlock(_, _, ptr, _) => PointerBlock(convert(ptr))(blame(e))
       case ValPointerBlockLength(_, _, ptr, _) =>
         PointerBlockLength(convert(ptr))(blame(e))
       case ValPointerBlockOffset(_, _, ptr, _) =>
@@ -2255,7 +2284,9 @@ case class CPPToCol[G](
             groupText.toInt,
         )
       case ValUnfolding(_, predExpr, _, body) =>
-        Unfolding(convert(predExpr), convert(body))(blame(e))
+        Unfolding(AmbiguousFoldTarget(convert(predExpr)), convert(body))(blame(
+          e
+        ))
       case ValOld(_, _, expr, _) => Old(convert(expr), at = None)(blame(e))
       case ValOldLabeled(_, _, label, _, _, expr, _) =>
         Old(
@@ -2350,4 +2381,9 @@ case class CPPToCol[G](
         Block(Nil)(DiagnosticOrigin)
     }
 
+  def isSigned(t: Type[G]): Boolean =
+    t match {
+      case t: BitwiseType[G] => t.signed
+      case _ => true
+    }
 }

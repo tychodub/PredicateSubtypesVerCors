@@ -107,7 +107,7 @@ case object LangCPPToCol {
           kernelLambda.blame.blame(SYCLKernelLambdaFailure(
             KernelPostconditionFailed(failure, Right(kernelLambda))
           ))
-        case TerminationMeasureFailed(applicable, apply, measure) =>
+        case error: TerminationMeasureFailed =>
           PanicBlame("Kernel lambdas do not have a termination measure yet")
             .blame(error)
         case ContextEverywhereFailedInPost(failure, node) =>
@@ -412,8 +412,8 @@ case object LangCPPToCol {
   private case class SYCLBufferDestructionUnfoldFailedBlame(
       bufferDecl: Variable[_],
       scope: CPPLifetimeScope[_],
-  ) extends Blame[UnfoldFailed] {
-    override def blame(error: UnfoldFailed): Unit =
+  ) extends Blame[UnfoldFailure] {
+    override def blame(error: UnfoldFailure): Unit =
       throw SYCLBufferDestructionFailed(bufferDecl, scope)
   }
 
@@ -510,7 +510,7 @@ case object LangCPPToCol {
             (node.o, c.descInContext + ", since ..."),
             (failure.node.o, "... " + failure.descCompletion),
           )
-        case TerminationMeasureFailed(_, _, _) =>
+        case error: TerminationMeasureFailed =>
           PanicBlame(
             "This kernel class constructor should always be able to terminate."
           ).blame(error)
@@ -864,15 +864,17 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
     throw LambdaDefinitionUnsupported(lambda)
   }
 
-  def checkPredicateFoldingAllowed(predRes: Expr[Pre]): Unit =
+  def checkPredicateFoldingAllowed(predRes: FoldTarget[Pre]): Unit =
     predRes match {
-      case CPPInvocation(
-            CPPLocal("sycl::buffer::exclusive_hostData_access", Seq()),
-            _,
-            _,
-            _,
+      case AmbiguousFoldTarget(
+            e @ CPPInvocation(
+              CPPLocal("sycl::buffer::exclusive_hostData_access", Seq()),
+              _,
+              _,
+              _,
+            )
           ) =>
-        throw SYCLPredicateFoldingNotAllowed(predRes)
+        throw SYCLPredicateFoldingNotAllowed(e)
       case _ =>
     }
 
@@ -976,7 +978,8 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
             declared = true
           case None =>
             cppGlobalNameSuccessor(RefCPPGlobalDeclaration(decl, idx)) = rw
-              .globalDeclarations.declare(new HeapVariable(t)(namedO))
+              .globalDeclarations
+              .declare(new HeapVariable(t, init.init.map(rw.dispatch))(namedO))
         }
       }
     }
@@ -1174,6 +1177,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
           args,
           givenMap,
           yields,
+          reveal = false,
           inv,
           inv.blame,
         )
@@ -1348,7 +1352,8 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
 
     // Create a class that can be used to create a 'this' object
     // It will be linked to the class made near the end of this method.
-    val preEventClass: Class[Pre] = new Class(Nil, Nil, Nil, tt)(commandGroup.o)
+    val preEventClass: Class[Pre] =
+      new ByReferenceClass(Nil, Nil, Nil, tt)(commandGroup.o)
     this.currentThis = Some(
       rw.dispatch(ThisObject[Pre](preEventClass.ref)(preEventClass.o))
     )
@@ -1459,6 +1464,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
         kernelRunnerPreCondition,
         kernelRunnerPostCondition,
         tt,
+        tt,
         Nil,
         Nil,
         Nil,
@@ -1476,7 +1482,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
 
     // Create the surrounding class
     val postEventClass =
-      new Class[Post](
+      new ByReferenceClass[Post](
         typeArgs = Seq(),
         decls =
           currentKernelType.get.getRangeFields ++
@@ -1490,7 +1496,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
 
     // Create a variable to refer to the class instance
     val eventClassRef =
-      new Variable[Post](TClass(postEventClass.ref, Seq()))(
+      new Variable[Post](TByReferenceClass(postEventClass.ref, Seq()))(
         commandGroup.o.where(name = "sycl_event_ref")
       )
     // Store the class ref and read-write accessors to be used when the kernel is done running
@@ -1976,7 +1982,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
       preClass: Class[Pre],
       commandGroupO: Origin,
   ): Procedure[Post] = {
-    val t = rw.dispatch(TClass[Pre](preClass.ref, Seq()))
+    val t = rw.dispatch(TByReferenceClass[Pre](preClass.ref, Seq()))
     rw.globalDeclarations.declare(
       withResult((result: Result[Post]) => {
         val constructorPostConditions: mutable.Buffer[Expr[Post]] =
@@ -2057,6 +2063,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
                   )),
                 ),
                 tt,
+                tt,
                 Seq(),
                 Seq(),
                 Seq(),
@@ -2106,7 +2113,7 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
   )(implicit o: Origin): IterVariable[Post] = {
     val variable =
       new Variable[Post](TCInt())(o.where(name = s"${scope.idName}_$dimension"))
-    new IterVariable[Post](variable, CIntegerValue(0), maxRange)
+    new IterVariable[Post](variable, c_const(0), maxRange)
   }
 
   // Used for generation the contract for the method wrapping the parblocks
@@ -2142,22 +2149,24 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
         scale(cond)
       else
         rw.variables.scope {
-          val range = quantVars.map(v =>
-            rangesMap(v)._1 <= Local[Post](v.ref) &&
-              Local[Post](v.ref) < rangesMap(v)._2
-          ).reduceOption[Expr[Post]](And(_, _)).getOrElse(tt)
+          rw.localHeapVariables.scope {
+            val range = quantVars.map(v =>
+              rangesMap(v)._1 <= Local[Post](v.ref) &&
+                Local[Post](v.ref) < rangesMap(v)._2
+            ).reduceOption[Expr[Post]](And(_, _)).getOrElse(tt)
 
-          cond match {
-            case Forall(bindings, Nil, body) =>
-              Forall(bindings ++ quantVars, Nil, range ==> scale(body))
-            case s @ Starall(bindings, Nil, body) =>
-              Starall(bindings ++ quantVars, Nil, range ==> scale(body))(
-                s.blame
-              )
-            case other =>
-              Starall(quantVars.toSeq, Nil, range ==> scale(other))(
-                ParBlockNotInjective(block, other)
-              )
+            cond match {
+              case Forall(bindings, Nil, body) =>
+                Forall(bindings ++ quantVars, Nil, range ==> scale(body))
+              case s @ Starall(bindings, Nil, body) =>
+                Starall(bindings ++ quantVars, Nil, range ==> scale(body))(
+                  s.blame
+                )
+              case other =>
+                Starall(quantVars.toSeq, Nil, range ==> scale(other))(
+                  ParBlockNotInjective(block, other)
+                )
+            }
           }
         }
     })
@@ -2390,9 +2399,10 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
 
     // Fold predicate to gain exclusive access to the hostData
     val gainExclusiveAccess =
-      Fold(
-        PredicateApply[Post](exclusiveAccessPredicate.ref, args, WritePerm())
-      )(SYCLBufferConstructionFoldFailedBlame(inv))
+      Fold(ScaledPredicateApply(
+        PredicateApply[Post](exclusiveAccessPredicate.ref, args),
+        WritePerm(),
+      ))(SYCLBufferConstructionFoldFailedBlame(inv))
 
     val v = new Variable[Post](TArray(postType.typ))(varNameO)
     syclBufferSuccessor.top
@@ -2439,9 +2449,10 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
     // Unfold predicate to release exclusive access to the hostData
     val args = Seq(buffer.hostData, buffer.range.size)
     val removeExclusiveAccess =
-      Unfold(
-        PredicateApply[Post](exclusiveAccessPredicate.ref, args, WritePerm())
-      )(SYCLBufferDestructionUnfoldFailedBlame(buffer.generatedVar, scope))
+      Unfold(ScaledPredicateApply(
+        PredicateApply[Post](exclusiveAccessPredicate.ref, args),
+        WritePerm(),
+      ))(SYCLBufferDestructionUnfoldFailedBlame(buffer.generatedVar, scope))
 
     Block(kernelTerminations ++ Seq(Eval(copyInv), removeExclusiveAccess))
   }
@@ -2577,14 +2588,14 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
   def rewriteLifetimeScope(scope: CPPLifetimeScope[Pre]): Statement[Post] = {
     implicit val o: Origin = scope.o
 
-    syclBufferSuccessor.push(mutable.Map.empty)
+    val successorMap = mutable.Map.empty[Variable[Post], SYCLBuffer[Post]]
 
-    val rewrittenBody = rw.dispatch(scope.body)
+    val rewrittenBody =
+      syclBufferSuccessor.having(successorMap) { rw.dispatch(scope.body) }
 
     // Destroy all buffers and copy their data back to host
     val bufferDestructions: Seq[Statement[Post]] =
-      syclBufferSuccessor.pop().map(tuple => destroySYCLBuffer(tuple._2, scope))
-        .toSeq
+      successorMap.map(tuple => destroySYCLBuffer(tuple._2, scope)).toSeq
 
     Block[Post](rewrittenBody +: bufferDestructions)
   }
@@ -2727,17 +2738,20 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
     decl.decl.specs match {
       case Seq(CPPSpecificationType(cta @ CPPTArray(sizeOption, oldT))) =>
         val t = rw.dispatch(oldT)
-        val v = new Variable[Post](TPointer(t))(o.sourceName(info.name))
+        val v = new Variable[Post](TPointer(t, None))(o.sourceName(info.name))
         cppNameSuccessor(RefCPPLocalDeclaration(decl, 0)) = v
 
         (sizeOption, init.init) match {
           case (None, None) => throw WrongCPPType(decl)
           case (Some(size), None) =>
-            val newArr = NewPointerArray[Post](t, rw.dispatch(size))(cta.blame)
+            val newArr =
+              NewNonNullPointer[Post](t, rw.dispatch(size), None)(cta.blame)
             Block(Seq(LocalDecl(v), assignLocal(v.get, newArr)))
           case (None, Some(CPPLiteralArray(exprs))) =>
             val newArr =
-              NewPointerArray[Post](t, c_const[Post](exprs.size))(cta.blame)
+              NewNonNullPointer[Post](t, c_const[Post](exprs.size), None)(
+                cta.blame
+              )
             Block(
               Seq(LocalDecl(v), assignLocal(v.get, newArr)) ++
                 assignliteralArray(v, exprs, o)
@@ -2748,7 +2762,9 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
             if (realSize < exprs.size)
               logger.warn(s"Excess elements in array initializer: '${decl}'")
             val newArr =
-              NewPointerArray[Post](t, c_const[Post](realSize))(cta.blame)
+              NewNonNullPointer[Post](t, c_const[Post](realSize), None)(
+                cta.blame
+              )
             Block(
               Seq(LocalDecl(v), assignLocal(v.get, newArr)) ++
                 assignliteralArray(v, exprs.take(realSize.intValue), o)
@@ -2776,6 +2792,6 @@ case class LangCPPToCol[Pre <: Generation](rw: LangSpecificToCol[Pre])
 
   def arrayType(t: CPPTArray[Pre]): Type[Post] = {
     // TODO: we should not use pointer here
-    TPointer(rw.dispatch(t.innerType))
+    TPointer(rw.dispatch(t.innerType), None)
   }
 }

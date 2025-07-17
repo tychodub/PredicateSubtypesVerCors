@@ -29,9 +29,8 @@ case class SimplifyQuantifiedRelations[Pre <: Generation]()
   private def one: IntegerValue[Pre] = IntegerValue(1)
 
   def indepOf[G](bindings: Seq[Variable[G]], e: Expr[G]): Boolean =
-    e.transSubnodes.collectFirst {
-      case Local(ref) if bindings.contains(ref.decl) => ()
-    }.isEmpty
+    e.collectFirst { case Local(ref) if bindings.contains(ref.decl) => () }
+      .isEmpty
 
   case class ExtremeValue(
       bindings: Seq[Variable[Pre]],
@@ -164,34 +163,34 @@ case class SimplifyQuantifiedRelations[Pre <: Generation]()
             right match {
               case Local(Ref(v)) if bindings.contains(v) =>
                 if (!comp.less)
-                  inclusiveLowerBound(v) +=
-                    (if (comp.eq)
-                       left
-                     else
-                       left + one)
-                if (!comp.greater)
                   exclusiveUpperBound(v) +=
                     (if (comp.eq)
                        left + one
                      else
                        left)
+                if (!comp.greater)
+                  inclusiveLowerBound(v) +=
+                    (if (comp.eq)
+                       left
+                     else
+                       left + one)
               case _ => return None
             }
           } else if (indepOf(bindings, right)) {
             left match {
               case Local(Ref(v)) if bindings.contains(v) =>
                 if (!comp.less)
-                  exclusiveUpperBound(v) +=
-                    (if (comp.eq)
-                       right + one
-                     else
-                       right)
-                if (!comp.greater)
                   inclusiveLowerBound(v) +=
                     (if (comp.eq)
                        right
                      else
                        right + one)
+                if (!comp.greater)
+                  exclusiveUpperBound(v) +=
+                    (if (comp.eq)
+                       right + one
+                     else
+                       right)
               case _ => return None
             }
           } else

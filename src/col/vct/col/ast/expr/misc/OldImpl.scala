@@ -1,10 +1,17 @@
 package vct.col.ast.expr.misc
 
-import vct.col.ast.{Old, Type}
+import vct.col.ast.node.NodeFamilyImpl
+import vct.col.ast.{ContractApplicable, Old, Type}
 import vct.col.print.{Ctx, Doc, Precedence, Text}
 import vct.col.ast.ops.OldOps
+import vct.col.check.{
+  CheckContext,
+  CheckError,
+  OldInFunctionContract,
+  OldInPrecondition,
+}
 
-trait OldImpl[G] extends OldOps[G] {
+trait OldImpl[G] extends OldOps[G] with NodeFamilyImpl[G] {
   this: Old[G] =>
   override def t: Type[G] = expr.t
 
@@ -18,4 +25,19 @@ trait OldImpl[G] extends OldOps[G] {
       case (_, Some(at)) =>
         Text("\\old[") <> ctx.name(at) <> "](" <> expr <> ")"
     }
+
+  override def check(context: CheckContext[G]): Seq[CheckError] = {
+    var result = super.check(context)
+    if (
+      context.currentApplicable.exists {
+        case a: ContractApplicable[G] => a.pure
+        case _ => false
+      }
+    )
+      result = result :+ OldInFunctionContract(this)
+    else if (context.inPreCondition)
+      result = result :+ OldInPrecondition(this)
+
+    result
+  }
 }

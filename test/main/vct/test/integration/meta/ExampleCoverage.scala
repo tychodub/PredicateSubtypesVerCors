@@ -2,6 +2,12 @@ package vct.test.integration.meta
 
 import org.scalatest.flatspec.AnyFlatSpec
 import vct.test.integration.examples._
+import vct.test.integration.examples.veymont.{
+  FM2023VeyMontSpec,
+  TechnicalVeyMontSpec,
+  VeyMontExamplesSpec,
+  IFM2024VeyMontPermissionsSpec,
+}
 import vct.test.integration.helper._
 
 class ExampleCoverage extends AnyFlatSpec {
@@ -10,7 +16,9 @@ class ExampleCoverage extends AnyFlatSpec {
       new AbruptExamplesSpec(),
       new AlgorithmExamplesSpec(),
       new ArrayExamplesSpec(),
+      new AssertingAssumingSpec(),
       new BasicExamplesSpec(),
+      new BitVectorSpec(),
       new CIncludeSpec(),
       new ClassesSpec(),
       new CounterSpec(),
@@ -35,6 +43,8 @@ class ExampleCoverage extends AnyFlatSpec {
       new PointerSpec(),
       new PredicatesSpec(),
       new PublicationsSpec(),
+      new QualifierSpec(),
+      new StructQualifierSpec(),
       new RefuteSpec(),
       new SequencesSpec(),
       new SetsSpec(),
@@ -53,13 +63,13 @@ class ExampleCoverage extends AnyFlatSpec {
       new TechnicalSpec(),
       new TechnicalStaticSpec(),
       new TechnicalVeyMontSpec(),
-      new TechnicalVeyMontExamplesSpec(),
       new TerminationSpec(),
       new TypeValuesSpec(),
-      new VcllvmSpec(),
+      new LLVMSpec(),
       new VerifyThisSpec(),
-      new VeyMontToolPaperSpec(),
+      new FM2023VeyMontSpec(),
       new VeyMontExamplesSpec(),
+      new IFM2024VeyMontPermissionsSpec(),
       new WaitNotifySpec(),
       new WandSpec(),
       new AutoValueSpec(),
@@ -69,13 +79,16 @@ class ExampleCoverage extends AnyFlatSpec {
 
     var shouldFail = false
 
-    for(f <- ExampleFiles.FILES) {
-      if(!testedFiles.contains(f)) {
+    for (f <- ExampleFiles.FILES) {
+      if (!testedFiles.contains(f)) {
         shouldFail = true
         println(s"Not tested: $f")
       }
     }
 
-    if(shouldFail) fail("The test suite does not have a test entry that processes the above files.")
+    if (shouldFail)
+      fail(
+        "The test suite does not have a test entry that processes the above files."
+      )
   }
 }

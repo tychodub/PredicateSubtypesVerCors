@@ -90,9 +90,7 @@ case class DesugarPermissionOperators[Pre <: Generation]()
         )
       case node @ PointerLocation(pointer) =>
         DerefPointer(pointer)(FramedPointerDerefBlame(node.blame))(loc.o)
-      case PredicateLocation(predicate, args) => throw PredicateValueError(loc)
-      case InstancePredicateLocation(predicate, obj, args) =>
-        throw PredicateValueError(loc)
+      case PredicateLocation(_) => throw PredicateValueError(loc)
       case AmbiguousLocation(expr) => expr
       case InLinePatternLocation(loc, _) => extractValueFromLocation(loc)
     }
@@ -151,13 +149,17 @@ case class DesugarPermissionOperators[Pre <: Generation]()
           ) <= PointerBlockLength(dispatch(p))(FramedPtrBlockLength) &* starall(
             IteratedPtrInjective,
             TInt(),
-            i =>
-              (const(0) <= i && i < dispatch(len)) ==> Perm(
-                PointerLocation(PointerAdd(dispatch(p), i)(FramedPtrOffset))(
-                  FramedPtrOffset
-                ),
-                dispatch(perm),
-              ),
+            body =
+              i =>
+                (const(0) <= i && i < dispatch(len)) ==>
+                  Perm(
+                    PointerLocation(
+                      PointerAdd(dispatch(p), i)(FramedPtrOffset)
+                    )(FramedPtrOffset),
+                    dispatch(perm),
+                  ),
+            triggers =
+              i => Seq(Seq(PointerSubscript(dispatch(p), i)(FramedPtrOffset))),
           )
       case PermPointerIndex(p, idx, perm) =>
         (dispatch(p) !== Null()) &* const(0) <= PointerBlockOffset(dispatch(p))(
@@ -171,7 +173,7 @@ case class DesugarPermissionOperators[Pre <: Generation]()
             )(FramedPtrOffset),
             dispatch(perm),
           )
-      case other => rewriteDefault(other)
+      case other => other.rewriteDefault()
     }
   }
 }
