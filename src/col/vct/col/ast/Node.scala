@@ -162,13 +162,17 @@ final case class CTStructUnique[G](
     unique: BigInt,
 )(implicit val o: Origin = DiagnosticOrigin)
     extends CType[G] with CTStructUniqueImpl[G]
-final case class TSubtype[G](refs: Expr[G], supertype: Type[G], strict: Boolean)(
-  implicit val o: Origin = DiagnosticOrigin
-) extends Type[G] with TSubtypeImpl[G]
-final case class SubtypeApply[G](ref: Ref[G, AbstractSubtype[G]],
-                                  args: Seq[Expr[G]],
-                                )(implicit val o: Origin = DiagnosticOrigin)
-  extends Apply[G] with SubtypeApplyImpl[G]
+final case class TSubtype[G](
+    refs: Expr[G],
+    supertype: Type[G],
+    strict: Boolean,
+)(implicit val o: Origin = DiagnosticOrigin)
+    extends Type[G] with TSubtypeImpl[G]
+final case class SubtypeApply[G](
+    ref: Ref[G, AbstractSubtype[G]],
+    args: Seq[Expr[G]],
+)(implicit val o: Origin = DiagnosticOrigin)
+    extends Apply[G] with SubtypeApplyImpl[G]
 
 sealed trait PointerType[G] extends Type[G] with PointerTypeImpl[G]
 final case class TPointer[G](element: Type[G], unique: Option[BigInt])(
@@ -183,9 +187,13 @@ final case class TConstPointer[G](element: Type[G])(
 final case class TNonNullConstPointer[G](element: Type[G])(
     implicit val o: Origin = DiagnosticOrigin
 ) extends PointerType[G] with TNonNullConstPointerImpl[G]
-final case class TSubtype[G](refs: Expr[G], supertype: Type[G], strict: Boolean)(
-    implicit val o: Origin = DiagnosticOrigin
-) extends Type[G] with TSubtypeImpl[G]
+
+final case class TSubtype[G](
+    refs: Expr[G],
+    supertype: Type[G],
+    strict: Boolean,
+)(implicit val o: Origin = DiagnosticOrigin)
+    extends Type[G] with TSubtypeImpl[G]
 final case class SubtypeApply[G](
     ref: Ref[G, AbstractSubtype[G]],
     args: Seq[Expr[G]],

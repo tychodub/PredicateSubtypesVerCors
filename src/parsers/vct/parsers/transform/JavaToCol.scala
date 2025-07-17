@@ -2111,16 +2111,16 @@ case class JavaToCol[G](
           )(origin(decl).sourceName(convert(name)))
         )
       case ValGlobalSubtype(
-      _,
-      name,
-      _,
-      subtypedVar,
-      _,
-      _,
-      args,
-      _,
-      definition,
-      ) =>
+            _,
+            name,
+            _,
+            subtypedVar,
+            _,
+            _,
+            args,
+            _,
+            definition,
+          ) =>
         definition match {
           case ValPureAbstractBody(_) =>
             fail(name, "abstract subtype bodies not supported")
@@ -2148,28 +2148,6 @@ case class JavaToCol[G](
     int match {
       case ValInterpSmtlib(_, int) => SmtLib()(origin(int)) -> convert(int)
       case ValInterpBoogie(_, int) => Boogie()(origin(int)) -> convert(int)
-      case ValGlobalSubtype(
-            _,
-            name,
-            _,
-            subtypedVar,
-            _,
-            _,
-            args,
-            _,
-            definition,
-          ) =>
-        definition match {
-          case ValPureAbstractBody(_) =>
-            fail(name, "abstract subtype bodies not supported")
-          case ValPureBody(_, expr, _) =>
-            Seq(
-              new GlobalSubtype(
-                convert(subtypedVar) +: args.map(convert(_)).getOrElse(Nil),
-                Some(convert(expr)),
-              )(origin(decl).sourceName(convert(name)))
-            )
-        }
     }
 
   def convert(
