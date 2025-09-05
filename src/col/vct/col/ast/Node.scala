@@ -188,18 +188,6 @@ final case class TNonNullConstPointer[G](element: Type[G])(
     implicit val o: Origin = DiagnosticOrigin
 ) extends PointerType[G] with TNonNullConstPointerImpl[G]
 
-final case class TSubtype[G](
-    refs: Expr[G],
-    supertype: Type[G],
-    strict: Boolean,
-)(implicit val o: Origin = DiagnosticOrigin)
-    extends Type[G] with TSubtypeImpl[G]
-final case class SubtypeApply[G](
-    ref: Ref[G, AbstractSubtype[G]],
-    args: Seq[Expr[G]],
-)(implicit val o: Origin = DiagnosticOrigin)
-    extends Apply[G] with SubtypeApplyImpl[G]
-
 sealed trait CompositeType[G] extends Type[G] with CompositeTypeImpl[G]
 sealed trait SizedType[G] extends CompositeType[G] with SizedTypeImpl[G]
 final case class TSeq[G](element: Type[G])(

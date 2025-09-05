@@ -281,7 +281,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
           ),
         )
 
-      case function: LlvmSpecFunction[Pre] =>
+      case function: LLVMSpecFunction[Pre] =>
         val argExpressions: Seq[Expr[Post]] = {
           function.args.map(arg =>
             subtypeAlgebraEval(o, gatherSubtypes(arg.t), Local(arg.ref))
@@ -362,7 +362,7 @@ case class SubtypeFunctionArgRewrite[Pre <: Generation]()
           )
         )
       case loop: Loop[Pre] =>
-        val subtypeExpressions: LazyList[Expr[Post]] = loop.init.collect {
+        val subtypeExpressions: Seq[Expr[Post]] = loop.init.collect {
           case assign: Assign[Pre] => assign.target
         }.map(target => subtypeAlgebraEval(o, gatherSubtypes(target.t), target))
 

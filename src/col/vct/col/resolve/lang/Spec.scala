@@ -80,7 +80,7 @@ case object Spec {
       objT: Type[G],
       field: String,
       blame: Blame[BuiltinError],
-      origin: Origin
+      origin: Origin,
   ): Option[BuiltinField[G]] = {
     implicit val o: Origin = origin
 
@@ -90,7 +90,7 @@ case object Spec {
         case (TSubtype(_, supertype, _), field) =>
           matchBuiltin(supertype, field)
 
-        case (TArray(_), "length") => Length(_)(blame)
+        case (TArray(_), "length") => Some(Length(_)(blame))
 
         case (_: SizedType[G], "isEmpty") => Some(Empty(_))
         case (_: SizedType[G], "size") => Some(Size(_))
